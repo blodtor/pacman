@@ -1,8 +1,12 @@
-
 /**
-
 Super Turbo Net Pac-Man
-реализация Pac-Man для GNU/Linux
+реализация Pac-Man для DOS и GNU/Linux
+
+Для Linux собирается gcc
+> gcc pacman.cpp
+
+Для DOS собирается Open Watcom - http://www.openwatcom.org/
+> wmake
 
 Драйвер для Intel 8∕16 LAN Adapter
 https://www.vogonswiki.com/index.php/Intel_8%E2%88%9516_LAN_Adapter
