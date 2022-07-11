@@ -510,6 +510,90 @@ char SPRITE_RED_SPIRIT_RIGHT2[14][15] = {
 
 
 /**
+ * Спрайт привидения которое хочет съесть нас
+ * 5 вид
+ */
+char SPRITE_RED_SPIRIT_DOWN1[14][15] = {
+        "00000111100000",
+        "00011111111000",
+        "00111111111100",
+        "01111111111110",
+        "01133111133110",
+        "01333311333311",
+        "11333311333311",
+        "11322311322311",
+        "11122111122111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11110111101111",
+        "01100011000110",
+};
+
+/**
+ * Спрайт привидения которое хочет съесть нас
+ * 6 вид
+ */
+char SPRITE_RED_SPIRIT_DOWN2[14][15] = {
+        "00000111100000",
+        "00011111111000",
+        "00111111111100",
+        "01111111111110",
+        "01133111133110",
+        "01333311333311",
+        "11333311333311",
+        "11322311322311",
+        "11122111122111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+		"11011100111011",
+        "10001100110001",
+};
+
+/**
+ * Спрайт привидения которое хочет съесть нас
+ * 7 вид
+ */
+char SPRITE_RED_SPIRIT_UP1[14][15] = {
+        "00000111100000",
+        "00022111122000",
+        "00322311322300",
+        "01333311333310",
+        "01333311333310",
+        "01133111133111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11110111101111",
+        "01100011000110",
+};
+
+/**
+ * Спрайт привидения которое хочет съесть нас
+ * 8 вид
+ */
+char SPRITE_RED_SPIRIT_UP2[14][15] = {
+        "00000111100000",
+        "00022111122000",
+        "00322311322300",
+        "01333311333310",
+        "01333311333310",
+        "01133111133111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+		"11011100111011",
+        "10001100110001",
+};
+
+/**
  * Спрайт привидения которое можно съесть
  * 1 вид
  */
@@ -1335,15 +1419,23 @@ void draw(int i, int j) {
             redSprite = 2;
             if (dxRed < 0) {
                 drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT1);
-            } else {
+            } else if (dxRed > 0) {
                 drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_RIGHT1);
+            } else if (dyRed > 0) {
+            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_DOWN1);
+            } else {
+            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_UP1);
             }
         } else {
             redSprite = 1;
             if (dxRed < 0) {
                 drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT2);
-            } else {
+            } else if (dxRed > 0) {
                 drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_RIGHT2);
+            } else if (dyRed > 0) {
+            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_DOWN2);
+            } else {
+            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_UP2);
             }
         }
     } else if (val == FOOD) {
