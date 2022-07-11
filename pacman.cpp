@@ -39,8 +39,10 @@ http://brutmanlabs.org/mTCP/
 #include <graph.h> // 2D graphics 
 #endif
 
-// скорость перехода пакмена с одной клетки на другую в милисекундах
+// скорость перехода pacman с одной клетки на другую в милисекундах
 const long PACMAN_SPEED = 150L;
+// скорость перехода pacGirl с одной клетки на другую в милисекундах
+const long PACGIRL_SPEED = 150L;
 // скорость перехода Красного призрака с одной клетки на другую в милисекундах
 const long RED_SPEED = 150L;
 // Еда
@@ -55,6 +57,8 @@ const char DOOR = '-';
 const char EMPTY  = ' ';
 // Pac-Man
 const char PACMAN = 'O';
+// Pac Girl
+const char PACGIRL = 'Q';
 // Красный призрак (SHADOW или BLINKY)
 const char RED    = '^';
 // Розовый призрак (SPEEDY или PIKKEY)
@@ -146,16 +150,31 @@ const char WALL_Z = 'z';
 int pacmanX = 14;
 int pacmanY = 17;
 
+// текущие координаты PACGIRL
+int pacGirlX = 17;
+int pacGirlY = 3;
+
 // последний спрайт pacman
 int pacmanSprite = 1;
+
+// последний спрайт pacGirl
+int pacGirlSprite = 1;
 
 // направление движение PACMAN
 int dx=0;
 int dy=0;
 
+// направление движение PACGIRL
+int dxPacGirl=0;
+int dyPacGirl=0;
+
 // старые координаты PACMAN
 int oldX = pacmanX;
 int oldY = pacmanY;
+
+// старые координаты PACGIRL
+int oldPacGirlX = pacGirlX;
+int oldPacGirlY = pacGirlY;
 
 // направление движения RED (SHADOW или BLINKY)
 int dxRed=1;
@@ -203,6 +222,9 @@ int oldYRed = redY;
 // что лежит на клетке с RED (SHADOW или BLINKY)
 char oldRedVal = FOOD;
 
+// что лежит на клетке с PACGIRL
+char oldPacGirlVal = FOOD;
+
 // количество съеденных FOOD
 int score = 1;
 
@@ -231,6 +253,9 @@ long pacmanLastUpdateTime;
 
 // время поседнего обновления RED
 long redLastUpdateTime;
+
+// время последнего обновления положения pacGirl
+long pacGirlLastUpdateTime;
 
 // карта
 char map[23][32] = {
@@ -1312,6 +1337,8 @@ void draw_DOS() {
                     redSprite = 1;
                     drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT2);
                 }
+            } else if (val == PACGIRL) {
+            		drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT1);
             } else if (val == FOOD) {
                 drawFood(j, i, 7);
             } else if (val == EMPTY) {
@@ -1414,6 +1441,37 @@ void draw(int i, int j) {
             pacmanSprite = 1;
             drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
         }
+    } else if (val == PACGIRL) {
+        if (pacGirlSprite == 1) {
+        	pacGirlSprite = 2;
+            if (dxPacGirl < 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_LEFT1);
+            } else if (dxPacGirl > 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_RIGHT1);
+            } else if (dyPacGirl < 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_UP1);
+            } else if (dyPacGirl > 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_DOWN1);
+            } else {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_FULL);
+            }
+        } else if (pacGirlSprite == 2) {
+        	pacGirlSprite = 3;
+            if (dxPacGirl < 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_LEFT2);
+            } else if (dxPacGirl > 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_RIGHT2);
+            } else if (dyPacGirl < 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_UP2);
+            } else if (dyPacGirl > 0) {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_DOWN2);
+            } else {
+                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_FULL);
+            }
+        } else if (pacGirlSprite == 3) {
+        	pacGirlSprite = 1;
+            drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_FULL);
+        }
     } else if (val == RED) {
         if (redSprite == 1) {
             redSprite = 2;
@@ -1488,15 +1546,24 @@ void refresh_DOS() {
         draw(pacmanY, pacmanX);
     }
 
+    if (oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
+        draw(oldPacGirlY, oldPacGirlX);
+        draw(pacGirlY, pacGirlX);
+    }
+
     //_setvisualpage(activePage);
 }
 
 long current_timestamp() {
+	struct dosdate_t date;
     struct dostime_t time;
+
+    // получить текущую дату
+    _dos_getdate(&date);
     // получить текущее время
     _dos_gettime(&time);
     // вычисляем милисекунды
-    long milliseconds =  time.hour * 24L * 60000L + time.minute * 60000L + time.second * 1000L + time.hsecond * 10L;
+    long milliseconds = date.day * 44640000L * 60000L + time.hour * 1440000L + time.minute * 60000L + time.second * 1000L + time.hsecond * 10L;
 
     return milliseconds;
 }
@@ -1655,6 +1722,25 @@ int pacmanLooser() {
 
             oldRedVal = EMPTY;
         }
+    } else if (redY == pacGirlY && redX == pacGirlX) {
+        // проверяем что Pac-Girl съела на месте RED
+        if (oldRedVal == FOOD) {
+            // еду
+            score++;
+        } else if(oldRedVal == POWER_FOOD) {
+            // поверап
+            score++;
+            powerBonus+=SCORE_POWER_BONUS;
+            // обнавляем время когда RED стал съедобным
+            redTime = current_timestamp();
+            // RED становится съедобным
+            redFlag = 0;
+        } else if (oldRedVal == CHERRY) {
+            // вишню
+            cherryBonus+=SCORE_CHERY_BONUS;
+        }
+
+        oldRedVal = EMPTY;
     }
     return 0;
 }
@@ -1700,6 +1786,284 @@ void scoreForWin() {
 }
 
 
+int pacManState() {
+    // проверяем, у PACMAN задоно ли направление движения
+    if (dx!=0 || dy!=0) {
+        long t = current_timestamp();
+
+        // должен ли PACMAN переместиться на новую клетку
+        if (t-pacmanLastUpdateTime > PACMAN_SPEED) {
+            pacmanX=pacmanX+dx;
+            pacmanY=pacmanY+dy;
+
+            // запоминаем время перехода на новую клетку
+            pacmanLastUpdateTime = t;
+
+            // корректируем координаты PACMAN если надо (чтоб не вышел с поля)
+            moveBound(&pacmanX, &pacmanY);
+
+            // если текущая клетка с едой, увиличиваем счетчик съеденного
+            if (map[pacmanY][pacmanX] == FOOD) {
+               score++;
+            } else if (map[pacmanY][pacmanX] == POWER_FOOD) {
+                // RED становится съедобным
+                redFlag = 0;
+                // бежит в обратную сторону
+                dxRed=-1*dxRed;
+                dyRed=-1*dyRed;
+                // запоминаем время когда RED стал съедобным
+                redTime = current_timestamp();
+                // за POWER_FOOD тоже точка
+                score++;
+                // и даем еще бонус
+                powerBonus+=SCORE_POWER_BONUS;
+            } else if (map[pacmanY][pacmanX] == CHERRY) {
+                cherryBonus+=SCORE_CHERY_BONUS;
+            }
+
+
+            if (isNotWellOrDoor(pacmanY, pacmanX)) {
+                // если в новой клетке не дверь то в старой делаем пустую клетку
+                map[oldY][oldX]=EMPTY;
+            } else {
+                // если в новой клетке стена WALL или дверь DOOR
+                // остаемся на прошлой клетке
+                pacmanY = oldY;
+                pacmanX = oldX;
+                // вектор движения сбрасываем (PACMAN останавливается)
+                dx=0;
+                dy=0;
+            }
+
+            // рисуем пакмена в координатах текущей клетки карты
+            map[pacmanY][pacmanX] = PACMAN;
+
+            // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
+            if (score >= foodToWIN) {
+                // TODO showMap();
+                setBackStartVideoMode(old_apage, old_vpage);
+                printf("\n          Pac-Man WINER !!!\n");
+                return 0;
+            }
+
+
+            // сеъеи ли PACMAN привидение (или оно нас)
+            if (pacmanLooser()) {
+                setBackStartVideoMode(old_apage, old_vpage);
+                return 0;
+            }
+
+        }
+
+    }
+    return 1;
+}
+
+int redState() {
+    // проверяем, у RED задоно ли направление движения
+    if (dxRed!=0 || dyRed!=0) {
+        long t1 = current_timestamp();
+        if (t1-redLastUpdateTime > RED_SPEED) {
+            redX=redX+dxRed;
+            redY=redY+dyRed;
+            redLastUpdateTime = t1;
+
+            moveBound(&redX, &redY);
+
+            if (isNotWell(redY,redX)) {
+                map[oldYRed][oldXRed]=oldRedVal;
+                oldRedVal = map[redY][redX];
+
+                if (redX == 15 && redY >= 7 && redY <= 10 ) {
+                    dyRed = -1;
+                    dxRed = 0;
+                } else if (dxRed !=0) {
+                    if (redFlag && redY != pacmanY) {
+                        if (isNotWellOrDoor(redY+1, redX) && isNotWellOrDoor(redY-1, redX)) {
+                            if (abs(redY + 1 - pacmanY) < abs(redY - 1 - pacmanY)) {
+                                dyRed = 1;
+                            } else {
+                                dyRed = -1;
+                            }
+                        } else if (isNotWellOrDoor(redY+1, redX)) {
+                            if (abs(redY + 1 - pacmanY) < abs(redY - pacmanY)) {
+                                dyRed = 1;
+                            }
+                        }  else if (isNotWellOrDoor(redY-1, redX)) {
+                            if (abs(redY - 1 - pacmanY) < abs(redY - pacmanY)) {
+                                dyRed = -1;
+                            }
+
+                        }
+                    } else {
+                        if (isNotWellOrDoor(redY+1, redX)) {
+                            dyRed = rand() % 2;
+                        }
+
+                        if (isNotWellOrDoor(redY-1, redX)) {
+                            dyRed = -1 * (rand() % 2);
+                        }
+                    }
+
+
+                    if (dyRed != 0) {
+                        dxRed = 0;
+                    }
+
+                } else if (dyRed !=0) {
+                    if (redFlag && redX != pacmanX) {
+                        if (isNotWellOrDoor(redY, redX + 1) && isNotWellOrDoor(redY, redX - 1)) {
+                            if (abs(redX + 1 - pacmanX) < abs(redX - 1 - pacmanX)) {
+                                dxRed = 1;
+                            } else {
+                                dxRed = -1;
+                            }
+                        } else if (isNotWellOrDoor(redY, redX + 1)) {
+                            if (abs(redX + 1 - pacmanX) < abs(redX - pacmanX)) {
+                                dxRed = 1;
+                            }
+                        }  else if (isNotWellOrDoor(redY-1, redX)) {
+                            if (abs(redX - 1 - pacmanX) < abs(redX - pacmanX)) {
+                                dxRed = -1;
+                            }
+
+                        }
+                    } else {
+
+                        if (isNotWellOrDoor(redY, redX + 1)) {
+                            dxRed = rand() % 2;
+                        }
+
+                        if (isNotWellOrDoor(redY, redX - 1)) {
+                            dxRed = -1 * (rand() % 2);
+                        }
+
+                     }
+
+                    if (dxRed != 0) {
+                        dyRed = 0;
+                    }
+
+                }
+
+            } else {
+                 if (redX == 15 && redY >= 7 && redY <= 10 ) {
+                    dyRed = -1;
+                    dxRed = 0;
+                 }  else {
+
+                    redX = oldXRed;
+                    redY = oldYRed;
+
+                    if (dxRed != 0) {
+                        dxRed = 0;
+                        if (isNotWellOrDoor(redY+1, redX)) {
+                            dyRed = 1;
+                        } else if (isNotWellOrDoor(redY-1, redX)) {
+                            dyRed = -1;
+                        }
+                    } else {
+                        dyRed = 0;
+                        if (isNotWellOrDoor(redY, redX+1)) {
+                            dxRed = 1;
+                        } else if (isNotWellOrDoor(redY, redX-1)) {
+                            dxRed = -1;
+                        }
+                    }
+                }
+
+            }
+
+
+            // сеъеи ли PACMAN привидение (или оно нас)
+            if (pacmanLooser()) {
+                setBackStartVideoMode(old_apage, old_vpage);
+                return 0;
+            }
+        }
+    }
+
+
+    if (redFlag) {
+        map[redY][redX] = RED;
+    } else {
+        map[redY][redX] = SHADOW;
+    }
+
+    return 1;
+}
+
+
+int pacGirlState() {
+    // проверяем, у pacGirl задоно ли направление движения
+    if (dxPacGirl!=0 || dyPacGirl!=0) {
+        long t1 = current_timestamp();
+        if (t1- pacGirlLastUpdateTime > PACGIRL_SPEED) {
+        	if (pacGirlLastUpdateTime == startTime && map[pacGirlY][pacGirlX] == FOOD ) {
+        		 score++;
+        	}
+
+            pacGirlX=pacGirlX+dxPacGirl;
+            pacGirlY=pacGirlY+dyPacGirl;
+            pacGirlLastUpdateTime = t1;
+
+            moveBound(&pacGirlX, &pacGirlY);
+
+            // если текущая клетка с едой, увиличиваем счетчик съеденного
+            if (map[pacGirlY][pacGirlX] == FOOD) {
+               score++;
+            } else if (map[pacGirlY][pacGirlX] == POWER_FOOD) {
+                // RED становится съедобным
+                redFlag = 0;
+                // бежит в обратную сторону
+                dxRed=-1*dxRed;
+                dyRed=-1*dyRed;
+                // запоминаем время когда RED стал съедобным
+                redTime = current_timestamp();
+                // за POWER_FOOD тоже точка
+                score++;
+                // и даем еще бонус
+                powerBonus+=SCORE_POWER_BONUS;
+            } else if (map[pacGirlY][pacGirlX] == CHERRY) {
+                cherryBonus+=SCORE_CHERY_BONUS;
+            }
+
+            if (isNotWellOrDoor(pacGirlY, pacGirlX)) {
+                // если в новой клетке не дверь то в старой делаем пустую клетку
+            	oldPacGirlVal = map[pacGirlY][pacGirlX];
+                map[oldPacGirlY][oldPacGirlX]=EMPTY;
+            } else {
+                // если в новой клетке стена WALL или дверь DOOR
+                // остаемся на прошлой клетке
+            	pacGirlY = oldPacGirlY;
+            	pacGirlX = oldPacGirlX;
+                // вектор движения сбрасываем (PACMAN останавливается)
+            	dxPacGirl=0;
+            	dyPacGirl=0;
+            }
+
+            // рисуем пакмена в координатах текущей клетки карты
+            map[pacGirlY][pacGirlX] = PACGIRL;
+
+            // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
+            if (score >= foodToWIN) {
+                // TODO showMap();
+                setBackStartVideoMode(old_apage, old_vpage);
+                printf("\n          Pac-Girl WINER !!!\n");
+                return 0;
+            }
+
+            // сеъеи ли PACMAN привидение (или оно нас)
+            if (pacmanLooser()) {
+                setBackStartVideoMode(old_apage, old_vpage);
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
 int main() {    
     srand(time(NULL));
 
@@ -1708,13 +2072,14 @@ int main() {
     startTime = current_timestamp();
     pacmanLastUpdateTime = startTime;
     redLastUpdateTime = startTime;
-
+    pacGirlLastUpdateTime = startTime;
 
     redTime = startTime;
     // сколько очков нужно для выигрыша
     scoreForWin();
 
     map[pacmanY][pacmanX] = PACMAN;
+    //map[pacGirlY][pacGirlX] = PACGIRL;
     map[redY][redX] = RED;
 
     // запомнить видеорежим
@@ -1730,7 +2095,7 @@ int main() {
 
 
         // надо ли перерисовать карту
-        if (oldX != pacmanX || oldY != pacmanY || oldXRed != redX || oldYRed != redY) {
+        if (oldX != pacmanX || oldY != pacmanY || oldXRed != redX || oldYRed != redY || oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
             refreshMap();
         }
 
@@ -1751,6 +2116,10 @@ int main() {
         oldXRed = redX;
         oldYRed = redY;
 
+        // запоминаем текущие координаты PACGIRL
+        oldPacGirlX = pacGirlX;
+        oldPacGirlY = pacGirlY;
+
         // проверяем нажата ли кнопка
         if (kbhit()) {
 
@@ -1762,237 +2131,61 @@ int main() {
                 // key UP
                 case 65:  // Linux
                 case 72:  // DOS
-                case 119:
                     dy=-1;
                     dx=0;
                     break;
+                case 119:
+                	dyPacGirl=-1;
+                	dxPacGirl=0;
+                	break;
                 // key DOWN
                 case 66:  // Linux
                 case 80:  // DOS
-                case 115:
                     dy=1;
                     dx=0;
                     break;
+                case 115:
+                	dyPacGirl=1;
+                	dxPacGirl=0;
+                	break;
                 // key LEFT
                 case 68:  // Linux
                 case 75:  // DOS
-                case 97:
                     dx=-1;
                     dy=0;
                     break;
+                case 97:
+                	dxPacGirl=-1;
+                	dyPacGirl=0;
+                	break;
                 // key RIGHT
                 case 67:  // Linux
                 case 77:  // DOS 
-                case 100:
                     dx=1;
                     dy=0;
                     break;
+                case 100:
+                	dxPacGirl=1;
+                	dyPacGirl=0;
+                	break;
             }
         }
 
         /** Pac-Man **/
-        // проверяем, у PACMAN задоно ли направление движения
-        if (dx!=0 || dy!=0) {
-            long t = current_timestamp();
-
-            // должен ли PACMAN переместиться на новую клетку
-            if (t-pacmanLastUpdateTime > PACMAN_SPEED) {
-                pacmanX=pacmanX+dx;
-                pacmanY=pacmanY+dy;
-
-                // запоминаем время перехода на новую клетку
-                pacmanLastUpdateTime = t;
-
-                // корректируем координаты PACMAN если надо (чтоб не вышел с поля)
-                moveBound(&pacmanX, &pacmanY);
-
-                // если текущая клетка с едой, увиличиваем счетчик съеденного
-                if (map[pacmanY][pacmanX] == FOOD) {
-                   score++;
-                } else if (map[pacmanY][pacmanX] == POWER_FOOD) {
-                    // RED становится съедобным
-                    redFlag = 0;
-                    // бежит в обратную сторону
-                    dxRed=-1*dxRed;
-                    dyRed=-1*dyRed;
-                    // запоминаем время когда RED стал съедобным
-                    redTime = current_timestamp();
-                    // за POWER_FOOD тоже точка
-                    score++;
-                    // и даем еще бонус
-                    powerBonus+=SCORE_POWER_BONUS;
-                } else if (map[pacmanY][pacmanX] == CHERRY) {
-                    cherryBonus+=SCORE_CHERY_BONUS;
-                }
-
-
-                if (isNotWellOrDoor(pacmanY, pacmanX)) {
-                    // если в новой клетке не дверь то в старой делаем пустую клетку
-                    map[oldY][oldX]=EMPTY;
-                } else {
-                    // если в новой клетке стена WALL или дверь DOOR
-                    // остаемся на прошлой клетке
-                    pacmanY = oldY;
-                    pacmanX = oldX;
-                    // вектор движения сбрасываем (PACMAN останавливается)
-                    dx=0;
-                    dy=0;
-                }
-
-                // рисуем пакмена в координатах текущей клетки карты
-                map[pacmanY][pacmanX] = PACMAN;
-
-                // если съеденны все FOOD иPOWER_FOOD - PACMAN выиграл
-                if (score >= foodToWIN) {
-                    // TODO showMap();
-                    setBackStartVideoMode(old_apage, old_vpage);
-                    printf("          Pac-Man WINER !!!\n");
-                    return 0;
-                }
-
-
-                // сеъеи ли PACMAN привидение (или оно нас)                
-                if (pacmanLooser()) {
-                    setBackStartVideoMode(old_apage, old_vpage);
-                    return 0;
-                }
-
-            }
-
+        if(!pacManState()) {
+        	return 0;
         }
 
 
         /** RED */
-        // проверяем, у RED задоно ли направление движения
-        if (dxRed!=0 || dyRed!=0) {
-            long t1 = current_timestamp();
-            if (t1-redLastUpdateTime > RED_SPEED) {
-                redX=redX+dxRed;
-                redY=redY+dyRed;
-                redLastUpdateTime = t1;
-
-                moveBound(&redX, &redY);
-
-                if (isNotWell(redY,redX)) {
-                    map[oldYRed][oldXRed]=oldRedVal;
-                    oldRedVal = map[redY][redX];
-
-                    if (redX == 15 && redY >= 7 && redY <= 10 ) {
-                        dyRed = -1;
-                        dxRed = 0;
-                    } else if (dxRed !=0) {
-                        if (redFlag && redY != pacmanY) {
-                            if (isNotWellOrDoor(redY+1, redX) && isNotWellOrDoor(redY-1, redX)) {
-                                if (abs(redY + 1 - pacmanY) < abs(redY - 1 - pacmanY)) {
-                                    dyRed = 1;
-                                } else {
-                                    dyRed = -1;
-                                }
-                            } else if (isNotWellOrDoor(redY+1, redX)) {
-                                if (abs(redY + 1 - pacmanY) < abs(redY - pacmanY)) {
-                                    dyRed = 1;
-                                }
-                            }  else if (isNotWellOrDoor(redY-1, redX)) {
-                                if (abs(redY - 1 - pacmanY) < abs(redY - pacmanY)) {
-                                    dyRed = -1;
-                                }
-
-                            }
-                        } else {
-                            if (isNotWellOrDoor(redY+1, redX)) {
-                                dyRed = rand() % 2;
-                            }
-
-                            if (isNotWellOrDoor(redY-1, redX)) {
-                                dyRed = -1 * (rand() % 2);
-                            }
-                        }
-
-
-                        if (dyRed != 0) {
-                            dxRed = 0;
-                        }
-
-                    } else if (dyRed !=0) {
-                        if (redFlag && redX != pacmanX) {
-                            if (isNotWellOrDoor(redY, redX + 1) && isNotWellOrDoor(redY, redX - 1)) {
-                                if (abs(redX + 1 - pacmanX) < abs(redX - 1 - pacmanX)) {
-                                    dxRed = 1;
-                                } else {
-                                    dxRed = -1;
-                                }
-                            } else if (isNotWellOrDoor(redY, redX + 1)) {
-                                if (abs(redX + 1 - pacmanX) < abs(redX - pacmanX)) {
-                                    dxRed = 1;
-                                }
-                            }  else if (isNotWellOrDoor(redY-1, redX)) {
-                                if (abs(redX - 1 - pacmanX) < abs(redX - pacmanX)) {
-                                    dxRed = -1;
-                                }
-
-                            }
-                        } else {
-
-                            if (isNotWellOrDoor(redY, redX + 1)) {
-                                dxRed = rand() % 2;
-                            }
-
-                            if (isNotWellOrDoor(redY, redX - 1)) {
-                                dxRed = -1 * (rand() % 2);
-                            }
-
-                         }
-
-                        if (dxRed != 0) {
-                            dyRed = 0;
-                        }
-
-                    }
-
-                } else {
-                     if (redX == 15 && redY >= 7 && redY <= 10 ) {
-                        dyRed = -1;
-                        dxRed = 0;
-                     }  else {
-
-                        redX = oldXRed;
-                        redY = oldYRed;
-
-                        if (dxRed != 0) {
-                            dxRed = 0;
-                            if (isNotWellOrDoor(redY+1, redX)) {
-                                dyRed = 1;
-                            } else if (isNotWellOrDoor(redY-1, redX)) {
-                                dyRed = -1;
-                            }
-                        } else {
-                            dyRed = 0;
-                            if (isNotWellOrDoor(redY, redX+1)) {
-                                dxRed = 1;
-                            } else if (isNotWellOrDoor(redY, redX-1)) {
-                                dxRed = -1;
-                            }
-                        }
-                    }
-
-                }
-
-
-                // сеъеи ли PACMAN привидение (или оно нас)
-                if (pacmanLooser()) {
-                    setBackStartVideoMode(old_apage, old_vpage);
-                    return 0;
-                }
-            }
+        if(!redState()) {
+        	return 0;
         }
 
-
-        if (redFlag) {
-            map[redY][redX] = RED;
-        } else {
-            map[redY][redX] = SHADOW;
+        /** Pac-Girl **/
+        if(!pacGirlState() ) {
+        	return 0;
         }
-
 
 
     // Выход из игры 'q'
