@@ -16,7 +16,6 @@ http://dosdays.co.uk/topics/networking_in_dos.php
 
 mTCP - TCP/IP applications for your PC compatible retro-computers
 http://brutmanlabs.org/mTCP/
-
 */
 
 
@@ -87,22 +86,22 @@ const int COLOR_GREEN = 2;
 // голубой цвет
 const int COLOR_LIGHT_BLUE = 3;
 // красный цвет
-const int COLOR_RED = 4; 
+const int COLOR_RED = 4;
 // пурпурный цвет
 const int COLOR_PURPLE = 5;
 // коричневый цвет
-const int COLOR_BROWN = 6; 
+const int COLOR_BROWN = 6;
 // берюзовый цвет
 const int COLOR_TURQUOISE = 11;
 // желтый цвет
 const int COLOR_YELLOW = 14;
 // белый цвет
 const int COLOR_WHITE = 15;
-// Стена - угол верх лево
+// Стена - угол верх лево полный
 const char WALL_7 = '7';
 // Стена - верхняя
 const char WALL_8 = '8';
-// Стена - угол верх право
+// Стена - угол верх право полный
 const char WALL_9 = '9';
 // Стена - левая
 const char WALL_4 = '4';
@@ -110,11 +109,11 @@ const char WALL_4 = '4';
 const char WALL_5 = '5';
 // Стена - правая
 const char WALL_6 = '6';
-// Стена - угол низ лево
+// Стена - угол низ лево полная
 const char WALL_1 = '1';
-// Стена - угол низ право
+// Стена - угол низ право полная
 const char WALL_3 = '3';
-// Стена - низ
+// Стена - низ узкая
 const char WALL_2 = '2';
 // Стена - скругление низ лево
 const char WALL_0 = '0';
@@ -124,6 +123,24 @@ const char WALL_I = 'i';
 const char WALL_L = 'l';
 // Стена - скругление верх право
 const char WALL_D = 'd';
+// Стена - низ полная
+const char WALL_X = 'x';
+// Стена - скругление низ лево полная
+const char WALL_J  = 'j';
+// Стена - скругление низ право полная
+const char WALL_F = 'f';
+// Стена - угол низ лево
+const char WALL_S = 's';
+// Стена - угол низ право
+const char WALL_E = 'e';
+// Стена - угол верх право
+const char WALL_M = 'm';
+// Стена - угол верх лево
+const char WALL_N = 'n';
+// Стена - угол низ право тонкий
+const char WALL_Y = 'y';
+// Стена - угол низ лево тонкий
+const char WALL_Z = 'z';
 
 // текущие координаты PACMAN
 int pacmanX = 14;
@@ -221,32 +238,32 @@ char map[23][32] = {
     "4.............654.............6",
     "4*i220.i22220.l8d.i22220.i220*6",
     "4.............................6",
-    "4.i220.i20.i22222220.i20.i220.6",
+    "4.i220.fxj.i22mxn220.fxj.i220.6",
     "4......654....654....654......6",
-    "122220.651220.l8d.222354.i22223",
+    "1xxxxj.65s220.l8d.222e54.fxxxx3",
     "555554.654...........654.655555",
-    "555554.654.i220-i220.654.655555",
-    "88888d.l8d.688d l884.l8d.l88888",
-    "...........6       4...........",
-    "222220.i20.622222224.i20.i22222",
+    "555554.654.fxxj-fxxj.654.655555",
+    "88888d.l8d.678d l894.l8d.l88888",
+    "...........64     64...........",
+    "xxxxxj.fxj.61xxxxx34.fxj.fxxxxx",
     "555554.654.l8888888d.654.655555",
     "555554.654...........654.655555",
-    "78888d.l8d.l8895788d.l8d.l88889",
+    "78888d.l8d.i22mxn220.l8d.l88889",
     "4.............654.............6",
-    "4.i220.i22220.l8d.i22220.i220.6",
+    "4.i2mj.i22220.l8d.i22220.fn20.6",
     "4*..64...................64..*6",
-    "120.ld.i20.i22222220.i20.ld.i23",
+    "s20.ld.fxj.i22mxn220.fxj.ld.i2e",
     "4......654....654....654......6",
-    "4.i2222351220.l8d.i2235122220.6",
+    "4.i2222y8z220.l8d.i22y8z22220.6",
     "4.............................6",
-    "1222222222222222222222222222223",
+    "1xxxxxxxxxxxxxxxxxxxxxxxxxxxxx3",
     };
 
 /**
- * Спрайт pac-man 
+ * Спрайт pac-man
  * 1 вид
  */
-char SPRITE_PACMAN1[11][12] = {    
+char SPRITE_PACMAN_LEFT1[11][12] = {
         "00011111000",
         "00111111100",
         "01111111110",
@@ -261,10 +278,10 @@ char SPRITE_PACMAN1[11][12] = {
     };
 
 /**
- * Спрайт pac-man 
+ * Спрайт pac-man
  * 2 вид
  */
-char SPRITE_PACMAN2[11][12] = {    
+char SPRITE_PACMAN_LEFT2[11][12] = {
         "00111111000",
         "00011111100",
         "00001111110",
@@ -276,13 +293,13 @@ char SPRITE_PACMAN2[11][12] = {
         "00001111110",
         "00011111100",
         "00111111000",
-};    
+};
 
 /**
- * Спрайт pac-man 
+ * Спрайт pac-man
  * 3 вид
  */
-char SPRITE_PACMAN3[11][12] = {    
+char SPRITE_PACMAN_FULL[11][12] = {
         "00011111000",
         "00111111100",
         "01111111110",
@@ -301,7 +318,7 @@ char SPRITE_PACMAN3[11][12] = {
  * Спрайт pac-man
  * 4 вид
  */
-char SPRITE_PACMAN4[11][12] = {
+char SPRITE_PACMAN_RIGHT1[11][12] = {
         "00011111000",
         "00111111100",
         "01111111110",
@@ -319,7 +336,7 @@ char SPRITE_PACMAN4[11][12] = {
  * Спрайт pac-man
  * 5 вид
  */
-char SPRITE_PACMAN5[11][12] = {
+char SPRITE_PACMAN_RIGHT2[11][12] = {
         "00011111100",
         "00111111000",
         "01111110000",
@@ -337,7 +354,7 @@ char SPRITE_PACMAN5[11][12] = {
  * Спрайт pac-man
  * 6 вид
  */
-char SPRITE_PACMAN6[11][12] = {
+char SPRITE_PACMAN_UP1[11][12] = {
         "00000000000",
         "00100000100",
         "01100000110",
@@ -355,7 +372,7 @@ char SPRITE_PACMAN6[11][12] = {
  * Спрайт pac-man
  * 7 вид
  */
-char SPRITE_PACMAN7[11][12] = {
+char SPRITE_PACMAN_UP2[11][12] = {
         "00000000000",
         "00000000000",
         "10000000001",
@@ -373,36 +390,36 @@ char SPRITE_PACMAN7[11][12] = {
  * Спрайт pac-man
  * 8 вид
  */
-char SPRITE_PACMAN8[11][12] = {
+char SPRITE_PACMAN_DOWN1[11][12] = {
         "00011111000",
-		"00111111100",
-		"01111111110",
-		"11111111111",
-		"11111011111",
-		"11111011111",
-		"11110001111",
-		"11110001111",
-		"01100000110",
-		"00100000100",
-		"00000000000",
+        "00111111100",
+        "01111111110",
+        "11111111111",
+        "11111011111",
+        "11111011111",
+        "11110001111",
+        "11110001111",
+        "01100000110",
+        "00100000100",
+        "00000000000",
     };
 
 /**
  * Спрайт pac-man
  * 9 вид
  */
-char SPRITE_PACMAN9[11][12] = {
+char SPRITE_PACMAN_DOWN2[11][12] = {
         "00011111000",
-		"00111111100",
-		"01111111110",
-		"11111111111",
-		"11111011111",
-		"11110001111",
-		"11100000111",
-		"11000000011",
-		"10000000001",
-		"00000000000",
-		"00000000000",
+        "00111111100",
+        "01111111110",
+        "11111111111",
+        "11111011111",
+        "11110001111",
+        "11100000111",
+        "11000000011",
+        "10000000001",
+        "00000000000",
+        "00000000000",
 };
 
 
@@ -410,7 +427,7 @@ char SPRITE_PACMAN9[11][12] = {
  * Спрайт привидения которое хочет съесть нас
  * 1 вид
  */
-char SPRITE_RED_SPIRIT1[14][15] = {            
+char SPRITE_RED_SPIRIT_LEFT1[14][15] = {
         "00000111100000",
         "00011111111000",
         "00111111111100",
@@ -425,14 +442,14 @@ char SPRITE_RED_SPIRIT1[14][15] = {
         "11111111111111",
         "11110111101111",
         "01100011000110",
-        
+
 };
 
 /**
  * Спрайт привидения которое хочет съесть нас
  * 2 вид
  */
-char SPRITE_RED_SPIRIT2[14][15] = {            
+char SPRITE_RED_SPIRIT_LEFT2[14][15] = {
         "00000111100000",
         "00011111111000",
         "00111111111100",
@@ -450,10 +467,53 @@ char SPRITE_RED_SPIRIT2[14][15] = {
 };
 
 /**
- * Спрайт привидения которое можно съесть 
+ * Спрайт привидения которое хочет съесть нас
+ * 3 вид
+ */
+char SPRITE_RED_SPIRIT_RIGHT1[14][15] = {
+        "00000111100000",
+        "00011111111000",
+        "00111111111100",
+        "01111111111110",
+        "01113311113310",
+        "11133331133330",
+        "11133221133221",
+        "11133221133221",
+        "11113311113311",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11110111101111",
+        "01100011000110",
+};
+
+/**
+ * Спрайт привидения которое хочет съесть нас
+ * 4 вид
+ */
+char SPRITE_RED_SPIRIT_RIGHT2[14][15] = {
+        "00000111100000",
+        "00011111111000",
+        "00111111111100",
+        "01111111111110",
+        "01113311113310",
+        "11133331133330",
+        "11133221133221",
+        "11133221133221",
+        "11113311113311",
+        "11111111111111",
+        "11111111111111",
+        "11111111111111",
+        "11011100111011",
+        "10001100110001",
+};
+
+
+/**
+ * Спрайт привидения которое можно съесть
  * 1 вид
  */
-char SPRITE_SHADOW_SPIRIT1[14][15] = {            
+char SPRITE_SHADOW_SPIRIT1[14][15] = {
         "00000111100000",
         "00011111111000",
         "00111111111100",
@@ -471,10 +531,10 @@ char SPRITE_SHADOW_SPIRIT1[14][15] = {
     };
 
 /**
- * Спрайт привидения которое можно съесть 
+ * Спрайт привидения которое можно съесть
  * 2 вид
  */
-char SPRITE_SHADOW_SPIRIT2[14][15] = {    
+char SPRITE_SHADOW_SPIRIT2[14][15] = {
         "00000111100000",
         "00011111111000",
         "00111111111100",
@@ -492,9 +552,9 @@ char SPRITE_SHADOW_SPIRIT2[14][15] = {
 };
 
 /**
- * Спрайт вишни 
+ * Спрайт вишни
  */
-char SPRITE_CHERRY[12][13] = {    
+char SPRITE_CHERRY[12][13] = {
         "000000000022",
         "000000002222",
         "000000220200",
@@ -506,7 +566,7 @@ char SPRITE_CHERRY[12][13] = {
         "011101111110",
         "000001311110",
         "000001131110",
-        "000000111100",        
+        "000000111100",
     };
 
 
@@ -629,7 +689,7 @@ void setBackStartVideoMode_DOS(int old_apage, int old_vpage) {
     printf("\n          GAME OVER!\n");
 }
 
- void drawEmpty(int x, int y, int c) {    
+ void drawEmpty(int x, int y, int c) {
     int dx=8*x-3, dy=8*y-2; // смещение
     _setcolor(c);
     for (int i=0; i<14; i++) {
@@ -639,18 +699,18 @@ void setBackStartVideoMode_DOS(int old_apage, int old_vpage) {
     }
  }
 
- void drawUpWall(int x, int y, int c) {    
+ void drawUpWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
-        for (int j=0;j<4;j++) {
+        for (int j=0;j<6;j++) {
             _setpixel(i+dx,j+dy);
         }
     }
  }
 
-void drawLeftWall(int x, int y, int c) {    
+void drawLeftWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
@@ -659,10 +719,10 @@ void drawLeftWall(int x, int y, int c) {
             _setpixel(i+dx,j+dy);
         }
     }
- } 
+ }
 
 
-void drawRightWall(int x, int y, int c) {    
+void drawRightWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
@@ -671,9 +731,20 @@ void drawRightWall(int x, int y, int c) {
             _setpixel(i+dx,j+dy);
         }
     }
- } 
+ }
 
-void drawDownWall(int x, int y, int c) {    
+void drawDownWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        for (int j=5;j<6;j++) {
+            _setpixel(i+dx,j+dy);
+        }
+    }
+ }
+
+void drawDownFullWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
@@ -685,20 +756,35 @@ void drawDownWall(int x, int y, int c) {
  }
 
 
-void drawUpLeftCornerWall(int x, int y, int c) {    
+void drawUpLeftCornerWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
         for (int j=0;j<8;j++) {
-            if (i<4 || j<4) {
+            if (i<4 || j<6) {
                 _setpixel(i+dx,j+dy);
             }
         }
     }
- } 
+ }
 
- void drawDownLeftCornerWall(int x, int y, int c) {    
+void drawUpLeftCornerFullWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        if (i<4) {
+            for (int j=5;j<8;j++) {
+                _setpixel(i+dx,j+dy);
+            }
+        }
+
+        _setpixel(i+dx,5+dy);
+    }
+ }
+
+ void drawDownLeftCornerWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
@@ -709,10 +795,38 @@ void drawUpLeftCornerWall(int x, int y, int c) {
             }
         }
     }
- } 
+ }
+
+ void drawDownLeftCornerFullWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        if (i<4) {
+           for (int j=0;j<8;j++) {
+                _setpixel(i+dx,j+dy);
+           }
+        }
+        _setpixel(i+dx,5+dy);
+    }
+ }
+
+ void drawDownLeftCornerSmallWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        if (i<4) {
+           for (int j=0;j<6;j++) {
+                _setpixel(i+dx,j+dy);
+           }
+        }
+        _setpixel(i+dx,5+dy);
+    }
+ }
 
 
- void drawDownRightCornerWall(int x, int y, int c) {    
+ void drawDownRightCornerWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
@@ -723,88 +837,159 @@ void drawUpLeftCornerWall(int x, int y, int c) {
             }
         }
     }
- } 
+ }
 
 
-void drawUpRightCornerWall(int x, int y, int c) {    
+ void drawDownRightCornerFullWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        if (i>3) {
+            for (int j=0;j<8;j++) {
+                _setpixel(i+dx,j+dy);
+            }
+        }
+       _setpixel(i+dx,5+dy);
+
+    }
+ }
+
+ void drawDownRightCornerSmallWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        if (i>3) {
+            for (int j=0;j<6;j++) {
+                _setpixel(i+dx,j+dy);
+            }
+        }
+       _setpixel(i+dx,5+dy);
+
+    }
+ }
+
+void drawUpRightCornerWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
         for (int j=0;j<8;j++) {
-            if (i>3 || j<4) {
+            if (i>3 || j<6) {
                 _setpixel(i+dx,j+dy);
             }
         }
     }
- } 
+ }
 
-void drawFullWall(int x, int y, int c) {    
+void drawUpRightCornerFullWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {            
-            _setpixel(i+dx,j+dy);            
+        if (i>3) {
+            for (int j=5;j<8;j++) {
+                _setpixel(i+dx,j+dy);
+            }
+        } else {
+            _setpixel(i+dx,5+dy);
+        }
+
+    }
+ }
+
+void drawFullWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        for (int j=0;j<8;j++) {
+            _setpixel(i+dx,j+dy);
         }
     }
- } 
+ }
 
-void drawLeftDownPointWall(int x, int y, int c) {    
+void drawLeftDownPointWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {            
+        for (int j=5;j<6;j++) {
             if (i<4 && j>4) {
                 _setpixel(i+dx,j+dy);
-            }          
+            }
         }
     }
- } 
+ }
 
- void drawRightDownPointWall(int x, int y, int c) {    
+void drawLeftDownPointFullWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {            
+        for (int j=5;j<8;j++) {
+            if (i<4 && j>4) {
+                _setpixel(i+dx,j+dy);
+            }
+        }
+    }
+ }
+
+ void drawRightDownPointWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        for (int j=5;j<6;j++) {
             if (i>3 && j>4) {
                 _setpixel(i+dx,j+dy);
-            }          
+            }
         }
     }
- } 
+ }
 
-
- void drawRightUpPointWall(int x, int y, int c) {    
+ void drawRightDownPointFullWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {            
-            if (i>3 && j<4) {
+        for (int j=5;j<8;j++) {
+            if (i>3 && j>4) {
                 _setpixel(i+dx,j+dy);
-            }          
+            }
         }
     }
- } 
+ }
 
- void drawLeftUpPointWall(int x, int y, int c) {    
+ void drawRightUpPointWall(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {            
-            if (i<4 && j<4) {
+        for (int j=0;j<8;j++) {
+            if (i>3 && j<6) {
                 _setpixel(i+dx,j+dy);
-            }          
+            }
         }
     }
- } 
+ }
+
+ void drawLeftUpPointWall(int x, int y, int c) {
+    int dx=8*x, dy=8*y;
+
+    _setcolor(c);
+    for(int i=0;i<8;i++) {
+        for (int j=0;j<8;j++) {
+            if (i<4 && j<6) {
+                _setpixel(i+dx,j+dy);
+            }
+        }
+    }
+ }
 
 
- void drawFood(int x, int y, int c) {    
+ void drawFood(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
@@ -812,18 +997,18 @@ void drawLeftDownPointWall(int x, int y, int c) {
     _setpixel(3+dx,5+dy);
     _setpixel(4+dx,5+dy);
     _setpixel(4+dx,4+dy);
-    
- } 
+
+ }
 
  void drawPowerFood(int x, int y, int c) {
     int dx=8*x, dy=8*y;
 
     _setcolor(c);
     for(int i=2;i<6;i++) {
-        for (int j=2;j<6;j++) {            
+        for (int j=2;j<6;j++) {
             if (i>=2 && i<6 || j>2 && j<6) {
                 _setpixel(i+dx,j+dy);
-            }          
+            }
         }
     }
  }
@@ -833,10 +1018,10 @@ void drawLeftDownPointWall(int x, int y, int c) {
 
     _setcolor(c);
     for(int i=-2;i<11;i++) {
-       _setpixel(i+dx,6+dy);       
+       _setpixel(i+dx,6+dy);
     }
 
- } 
+ }
 
 
 /**
@@ -848,13 +1033,13 @@ void drawLeftDownPointWall(int x, int y, int c) {
  * p - спрайт привидения 11x11 пикселей - 2 цвета
  *     '0' - цвет фона
  *     '1' - цвет PAC-MAN
- */ 
+ */
 void drawPacMen(int x, int y, int c0, int c1, char p[11][12]) {
-    int dx=8*x-1, dy=8*y;    
-    
+    int dx=8*x-1, dy=8*y;
+
     for (int i=0; i<11; i++) {
         for (int j=0; j<11; j++) {
-            if (p[i][j] == '1') {                
+            if (p[i][j] == '1') {
                 _setcolor(c1); // цвет PAC-MAN
             } else {
                 _setcolor(c0); // цвет фона все остальное
@@ -883,9 +1068,9 @@ void drawPacMen(int x, int y, int c0, int c1, char p[11][12]) {
     int dx=8*x-3, dy=8*y-2; // смещение
     for (int i=0; i<14; i++) {
         for (int j=0; j<14; j++) {
-            if (p[i][j] == '1') {                
+            if (p[i][j] == '1') {
                 _setcolor(c1); // цвет призрака
-            } else if (p[i][j] == '2') { 
+            } else if (p[i][j] == '2') {
                 _setcolor(c2); // цвет зрачков
             } else if (p[i][j] == '3') {
                 _setcolor(c3); // цвет белков глаз
@@ -917,9 +1102,9 @@ void drawPacMen(int x, int y, int c0, int c1, char p[11][12]) {
     int dx=8*x-3, dy=8*y-2; // смещение
     for (int i=0; i<14; i++) {
         for (int j=0; j<14; j++) {
-            if (p[i][j] == '1') {                
+            if (p[i][j] == '1') {
                 _setcolor(c1); // цвет призрака
-            } else if (p[i][j] == '2') { 
+            } else if (p[i][j] == '2') {
                 _setcolor(c2); // цвет рта
             } else if (p[i][j] == '3') {
                 _setcolor(c3); // цвет глаз
@@ -950,9 +1135,9 @@ void drawPacMen(int x, int y, int c0, int c1, char p[11][12]) {
 
     for (int i=0; i<12; i++) {
         for (int j=0; j<12; j++) {
-            if (p[i][j] == '1') {                
+            if (p[i][j] == '1') {
                 _setcolor(c1); // цвет черешни
-            } else if (p[i][j] == '2') { 
+            } else if (p[i][j] == '2') {
                 _setcolor(c2); // цвет веточки
             } else if (p[i][j] == '3') {
                 _setcolor(c3); // цвет отблисков
@@ -980,50 +1165,68 @@ void draw_DOS() {
     for (int i = 0; i < mapSizeX; i++) {
         for (int j =0; j < mapSizeY ; j++) {
             char val = map[i][j] ;
-            if (val == WALL_8) {                        
+            if (val == WALL_8) {
                 drawUpWall(j, i, COLOR_BLUE);
             } else if(val == WALL_4) {
                 drawLeftWall(j, i, COLOR_BLUE);
             } else if (val == WALL_7) {
                 drawUpLeftCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_6) { 
+            } else if (val == WALL_6) {
                 drawRightWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_1) { 
+            } else if (val == WALL_1) {
                 drawDownLeftCornerWall(j, i, COLOR_BLUE);
             } else if (val == WALL_9) {
                 drawUpRightCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_5) { 
+            } else if (val == WALL_5) {
                 drawFullWall(j, i, COLOR_BLUE);
             } else if (val == WALL_3) {
                 drawDownRightCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_2) { 
+            } else if (val == WALL_2) {
                 drawDownWall(j, i, COLOR_BLUE);
             } else if (val == WALL_0) {
                 drawLeftDownPointWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_I) { 
+            } else if (val == WALL_I) {
                 drawRightDownPointWall(j, i, COLOR_BLUE);
             } else if (val == WALL_L) {
                 drawRightUpPointWall(j, i, COLOR_BLUE);
             } else if (val == WALL_D) {
                 drawLeftUpPointWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_X) {
+                drawDownFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_J) {
+                drawLeftDownPointFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_F) {
+                drawRightDownPointFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_S) {
+                drawDownLeftCornerFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_E) {
+                drawDownRightCornerFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_M) {
+                drawUpRightCornerFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_N) {
+                drawUpLeftCornerFullWall(j, i, COLOR_BLUE);
+            } else if (val == WALL_Y) {
+                drawDownRightCornerSmallWall(j, i, COLOR_BLUE);
+            } else if (val ==  WALL_Z) {
+                drawDownLeftCornerSmallWall(j, i, COLOR_BLUE);
             } else if (val == PACMAN) {
                 if (pacmanSprite == 1) {
                     pacmanSprite = 2;
-                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN1);
+                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT1);
                 } else if (pacmanSprite == 2) {
                     pacmanSprite = 3;
-                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN2);
+                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT2);
                 } else if (pacmanSprite == 3) {
                     pacmanSprite = 1;
-                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN3);
+                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
                 }
             } else if (val == RED) {
                 if (redSprite == 1) {
                     redSprite = 2;
-                    drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT1);
+                    drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT1);
                 } else {
                     redSprite = 1;
-                    drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT2);
+                    drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT2);
                 }
             } else if (val == FOOD) {
                 drawFood(j, i, 7);
@@ -1038,10 +1241,10 @@ void draw_DOS() {
                     redSprite = 2;
                     drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT1);
                 } else {
-                    redSprite = 1;                
+                    redSprite = 1;
                     drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT2);
                 }
-            } else if (val == CHERRY) {                
+            } else if (val == CHERRY) {
                 drawCherry(j, i, COLOR_BLACK, COLOR_RED, COLOR_BROWN, COLOR_WHITE, SPRITE_CHERRY);
             }
         }
@@ -1052,70 +1255,96 @@ void draw_DOS() {
 
 void draw(int i, int j) {
     char val = map[i][j] ;
-    if (val == WALL_8) {                        
+    if (val == WALL_8) {
         drawUpWall(j, i, COLOR_BLUE);
     } else if(val == WALL_4) {
         drawLeftWall(j, i, COLOR_BLUE);
     } else if (val == WALL_7) {
         drawUpLeftCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_6) { 
+    } else if (val == WALL_6) {
         drawRightWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_1) { 
+    } else if (val == WALL_1) {
         drawDownLeftCornerWall(j, i, COLOR_BLUE);
     } else if (val == WALL_9) {
         drawUpRightCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_5) { 
+    } else if (val == WALL_5) {
         drawFullWall(j, i, COLOR_BLUE);
     } else if (val == WALL_3) {
         drawDownRightCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_2) { 
+    } else if (val == WALL_2) {
         drawDownWall(j, i, COLOR_BLUE);
     } else if (val == WALL_0) {
         drawLeftDownPointWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_I) { 
+    } else if (val == WALL_I) {
         drawRightDownPointWall(j, i, COLOR_BLUE);
     } else if (val == WALL_L) {
         drawRightUpPointWall(j, i, COLOR_BLUE);
     } else if (val == WALL_D) {
         drawLeftUpPointWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_X) {
+        drawDownFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_J) {
+        drawLeftDownPointFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_F) {
+        drawRightDownPointFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_S) {
+        drawDownLeftCornerFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_E) {
+        drawDownRightCornerFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_M) {
+        drawUpRightCornerFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_N) {
+        drawUpLeftCornerFullWall(j, i, COLOR_BLUE);
+    } else if (val == WALL_Y) {
+        drawDownRightCornerSmallWall(j, i, COLOR_BLUE);
+    } else if (val ==  WALL_Z) {
+        drawDownLeftCornerSmallWall(j, i, COLOR_BLUE);
     } else if (val == PACMAN) {
         if (pacmanSprite == 1) {
             pacmanSprite = 2;
             if (dx < 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN1);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT1);
             } else if (dx > 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN4);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_RIGHT1);
             } else if (dy < 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN6);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_UP1);
             } else if (dy > 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN8);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_DOWN1);
             } else {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN3);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
             }
         } else if (pacmanSprite == 2) {
             pacmanSprite = 3;
             if (dx < 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN2);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT2);
             } else if (dx > 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN5);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_RIGHT2);
             } else if (dy < 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN7);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_UP2);
             } else if (dy > 0) {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN9);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_DOWN2);
             } else {
-            	drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN3);
+                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
             }
         } else if (pacmanSprite == 3) {
             pacmanSprite = 1;
-            drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN3);
+            drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
         }
     } else if (val == RED) {
         if (redSprite == 1) {
             redSprite = 2;
-            drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT1);
+            if (dxRed < 0) {
+                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT1);
+            } else {
+                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_RIGHT1);
+            }
         } else {
             redSprite = 1;
-            drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT2);
+            if (dxRed < 0) {
+                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT2);
+            } else {
+                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_RIGHT2);
+            }
         }
     } else if (val == FOOD) {
         drawFood(j, i, 7);
@@ -1125,15 +1354,15 @@ void draw(int i, int j) {
         drawPowerFood(j, i, COLOR_GREEN);
     } else if (val == DOOR) {
         drawDoor(j, i, 6);
-    } else if (val == SHADOW) {                
+    } else if (val == SHADOW) {
         if (redSprite == 1) {
             redSprite = 2;
             drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT1);
         } else {
-            redSprite = 1;                
+            redSprite = 1;
             drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT2);
         }
-    } else if (val == CHERRY) {                
+    } else if (val == CHERRY) {
         drawCherry(j, i, COLOR_BLACK, COLOR_RED, COLOR_BROWN, COLOR_WHITE, SPRITE_CHERRY);
     }
 }
@@ -1147,13 +1376,13 @@ void refresh_DOS() {
     //_setactivepage(activePage);
 
     if (refreshCherry) {
-    	draw(cherryY, cherryX);
-    	//refreshCherry = 0;
+        draw(cherryY, cherryX);
+        //refreshCherry = 0;
     }
 
     if (refreshDoor) {
-    	draw(doorY, doorX);
-    	refreshDoor = 0;
+        draw(doorY, doorX);
+        refreshDoor = 0;
     }
 
     if (oldXRed != redX || oldYRed != redY) {
@@ -1170,14 +1399,14 @@ void refresh_DOS() {
     //_setvisualpage(activePage);
 }
 
-long current_timestamp() {    
+long current_timestamp() {
     struct dostime_t time;
     // получить текущее время
     _dos_gettime(&time);
     // вычисляем милисекунды
     long milliseconds =  time.hour * 24L * 60000L + time.minute * 60000L + time.second * 1000L + time.hsecond * 10L;
-    
-    return milliseconds;        
+
+    return milliseconds;
 }
 #endif
 /**
@@ -1185,14 +1414,14 @@ long current_timestamp() {
  */
 void showMap() {
     /** Linux */
-	#ifdef __linux__
+    #ifdef __linux__
     system("clear");
     printf("   Super Turbo Net Pac-Man\n");
     for(int i = 0; i < mapSizeX; i++) {
         printf("%s\n",map[i]);
     }
     printf("Score %d! To win %d / %d!", score + redBonus + powerBonus + cherryBonus, score, foodToWIN);
-	#else
+    #else
     draw_DOS();
     #endif
 }
@@ -1243,7 +1472,9 @@ int isNotWell(int y, int x) {
     if (map[y][x] != WALL_0 && map[y][x] != WALL_1 && map[y][x] != WALL_2 && map[y][x] != WALL_3
         && map[y][x] != WALL_4 && map[y][x] != WALL_5 && map[y][x] != WALL_6 && map[y][x] != WALL_7
         && map[y][x] != WALL_8 && map[y][x] != WALL_9 && map[y][x] != WALL_I && map[y][x] != WALL_L
-        && map[y][x] != WALL_D
+        && map[y][x] != WALL_D && map[y][x] != WALL_X && map[y][x] != WALL_J && map[y][x] != WALL_F
+        && map[y][x] != WALL_S && map[y][x] != WALL_E && map[y][x] != WALL_M && map[y][x] != WALL_N
+        && map[y][x] != WALL_Y && map[y][x] != WALL_Z
         ) {
         return 1;
 
@@ -1340,25 +1571,25 @@ int pacmanLooser() {
  *  Запомнить видеорежим для DOS
  */
 void videoMode() {
-	#ifdef __linux__
-	 //  ничего не делаем, пока в консоли работает
-	#else
+    #ifdef __linux__
+     //  ничего не делаем, пока в консоли работает
+    #else
     setVideoMode_DOS();
 
     old_apage = getGetActivePage_DOS();
     old_vpage = getVisualPage_DOS();
-	#endif
+    #endif
 }
 
 /**
  * Вернуть видеорежим
  */
 void setBackStartVideoMode(int old_apage,int old_vpage) {
-	#ifdef __linux__
-	 // ничего не делаем, пока в консоли работает
-	#else
-	setBackStartVideoMode_DOS(old_apage, old_vpage);
-	#endif
+    #ifdef __linux__
+     // ничего не делаем, пока в консоли работает
+    #else
+    setBackStartVideoMode_DOS(old_apage, old_vpage);
+    #endif
 }
 
 
@@ -1443,7 +1674,7 @@ int main() {
                     dy=-1;
                     dx=0;
                     break;
-                // key DOWN                    
+                // key DOWN
                 case 66:  // Linux
                 case 80:  // DOS
                 case 115:
@@ -1670,7 +1901,7 @@ int main() {
             map[redY][redX] = SHADOW;
         }
 
-    
+
 
     // Выход из игры 'q'
     } while(ch != 'q');
