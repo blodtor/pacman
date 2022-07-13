@@ -25,13 +25,16 @@ http://brutmanlabs.org/mTCP/
 #include <stdlib.h>
 #include <fcntl.h>
 #include <time.h>
-
 #include <errno.h>
 
 // Linux
 #ifdef __linux__
 #include <sys/time.h>
 #include <termios.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #else
 // DOS
 #include <dos.h>   // _dos_gettime
@@ -145,6 +148,51 @@ const char WALL_N = 'n';
 const char WALL_Y = 'y';
 // Стена - угол низ лево тонкий
 const char WALL_Z = 'z';
+// не сетевая игра
+const int SINGLE_APPLICATION = 0;
+// игровой сервер 1-го игрока
+const int SERVER_APPLICATION = 1;
+// клиент 2-го игрока
+const int CLIENT_APPLICATION = 2;
+
+// серверный socket - ждет подключения клиентов
+// использует только сервер
+int serverSocket;
+
+// клиентский socket
+// запустились как сервер или как клиент 2-го игрока
+// всегда в этот сокет пишем или читаем данные
+// отправить на сервер / клиент 2-го игрока
+// прочитать данные на сервере / клиенте 2-го игрока
+int clientSocket;
+
+// массив для сетевого взаимодействия
+// весь обмен идет через него в функциях записи / чтения
+// четез интерфейс сокетов
+char buffer[256];
+
+// кнопка нажатая 2 игроком на клиенте 2-го игрока
+char player2PressKey;
+
+// тип приложения
+// SINGLE_APPLICATION - не сетевая игра
+// SERVER_APPLICATION - игровой сервер 1-го игрока
+// CLIENT_APPLICATION - клиент 2-го игрока
+int appType = SINGLE_APPLICATION;
+
+// значение двери (используется клиентом 2-го игрока)
+// (используется клиентом 2-го игрока при сетевом взаимодействии)
+char doorVal = DOOR;
+// значение для черешни
+// (используется клиентом 2-го игрока при сетевом взаимодействии)
+char cherryVal = EMPTY;
+
+// есть ли соединение
+// 1 - сетевое соединение между сервером 1го игрока
+//     и клиентом 2го игрока - разорвано
+// 0 - сетевое соединение между сервером 1го игрока
+//     и клиентом 2го игрока - создано и работает
+int connectionLost = 1;
 
 // текущие координаты PACMAN
 int pacmanX = 14;
@@ -685,9 +733,439 @@ int old_apage;
 // отображаемая видео страница  
 int old_vpage;
 
+// активная видео страница
 int activePage = 0;
 
+/**
+ * перевернуть строку
+ * s - переворачиваемая строка
+ */
+void reverse(char s[]) {
+    int i, j;
+    char c;
+
+    for (i = 0, j = strlen(s)-1; i<j; i++, j--) {
+        c = s[i];
+        s[i] = s[j];
+        s[j] = c;
+    }
+}
+
+/**
+ * преобразовать целое число в строку
+ * n - число которое превращаем в строку
+ * s -строка с результатом
+ */
+void itoa(int n, char s[]) {
+    int i, sign;
+
+    if ((sign = n) < 0)  /* record sign */
+        n = -n;          /* make n positive */
+    i = 0;
+    do {       /* generate digits in reverse order */
+        s[i++] = n % 10 + '0';   /* get next digit */
+    } while ((n /= 10) > 0);     /* delete it */
+    if (sign < 0)
+        s[i++] = '-';
+    s[i] = '\0';
+    reverse(s);
+}
+
+/**
+ * двухзначное число или однозначное отрицательное
+ * положить в глобальный массив buffer для дальнейшей
+ * передачи данных от сервера на клиент 2 го игрока
+ * в виде строки
+ *
+ * val - число которое надо записать в буфер - buffer
+ * i - начиная с какой позиции надо записать
+ *     передано по ссылке по этому меняется и в месте
+ *     откуда вызвали функцию
+ */
+void intToBuffer(int val,  int *i) {
+	char b[3];
+	itoa(val, b);
+	if (strlen(b) == 1) {
+		buffer[(*i)++]=EMPTY;
+		buffer[(*i)++]=b[0];
+	} else {
+		buffer[(*i)++]=b[0];
+		buffer[(*i)++]=b[1];
+	}
+}
+
+/**
+ * трехзначное число или двухзначное отрицательное
+ * положить в глобальный массив buffer для дальнейшей
+ * передачи данных от сервера на клиент 2 го игрока
+ * в виде строки
+ *
+ * val - число которое надо записать в буфер - buffer
+ * i - начиная с какой позиции надо записать
+ *     передано по ссылке по этому меняется и в месте
+ *     откуда вызвали функцию
+ */
+void intToBuffer3(int val,  int *i) {
+	char b[4];
+	itoa(val, b);
+	int n = strlen(b);
+	if (n == 1) {
+		buffer[(*i)++]=EMPTY;
+		buffer[(*i)++]=EMPTY;
+		buffer[(*i)++]=b[0];
+	}  else if (n == 2) {
+		buffer[(*i)++]=EMPTY;
+		buffer[(*i)++]=b[0];
+		buffer[(*i)++]=b[1];
+	} else if (n == 3) {
+		buffer[(*i)++]=b[0];
+		buffer[(*i)++]=b[1];
+		buffer[(*i)++]=b[2];
+	}
+}
+
+/**
+ * преобразует строку из массива buffer в число с заданной позиции
+ * при этом из массива берется 2 символа начиная с заданного места
+ *
+ * i - позиция в массиве buffer с которой парсим число
+ * return - двухзначное или однозначное отрицательное число
+ *          распарсеноое из глобального массива buffer
+ *          начиная с заданной позиции
+ */
+int bufferToInt(int *i) {
+	char b[2];
+	b[0] = buffer[(*i)++];
+	b[1] = buffer[(*i)++];
+	return atoi(b);
+}
+
+/**
+ * преобразует строку из массива buffer в число с заданной позиции
+ * при этом из массива берется 3 символа начиная с заданного места
+ *
+ * i - позиция в массиве buffer с которой парсим число
+ * return - трехзначное или двухзначное отрицательное число
+ *          распарсеноое из глобального массива buffer
+ *          начиная с заданной позиции
+ */
+int bufferToInt3(int *i) {
+	char b[3];
+	b[0] = buffer[(*i)++];
+	b[1] = buffer[(*i)++];
+	b[2] = buffer[(*i)++];
+	return atoi(b);
+}
+
+/**
+ * Тут идут функции только для Linux
+ */
 #ifdef __linux__
+/**
+ * Linux
+ *
+ * Создание сервера
+ * port - порт на катором поднимется сервер
+ */
+void pacmanLinuxServer(char * port) {
+	printf("Порт: '%s'\n", port);
+	// порт сервера на который ждем подключение клиента
+	int serverPort;
+	// структура содержащая адрес сервера
+	struct sockaddr_in serverAddress;
+	// структура содержащая адрес клиента
+	struct sockaddr_in clientAddress;
+	serverPort = atoi(port);
+
+    // создаем ерверный сокет
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0) {
+    	printf("\nERROR socket - не удалось открыть сокет (serverSocket)\n");
+    } else {
+		bzero((char *) &serverAddress, sizeof(serverAddress));
+
+		serverAddress.sin_family = AF_INET;
+		serverAddress.sin_addr.s_addr = INADDR_ANY;
+		serverAddress.sin_port = htons(serverPort);
+
+		// пробуем занять порт
+		if (bind(serverSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0) {
+			printf("\nERROR bind - не удалось занять порт\n");
+		} else {
+			// устанавливаем  serverSocket в состояние прослушивания, будет использоваться для
+			// приёма запросов входящих соединений с помощью accept()
+			// очередь ожидающих соединений  = 5
+			if (listen(serverSocket, 5) < 0) {
+				printf("\nERROR listen - не удвлось устанавить serverSocket в состояние прослушивания\n");
+			} else {
+				socklen_t clilen = sizeof(clientAddress);
+				clientSocket = accept(serverSocket, (struct sockaddr *) &clientAddress, &clilen);
+				if (clientSocket < 0) {
+					printf("\nERROR accept - не удалось создать соединения с клиентом\n");
+				} else {
+					// переводим сокет в не блокирующий режим
+					fcntl(clientSocket, F_SETFL, O_NONBLOCK);
+					// сервер поднят успешно и соеденился с клиентом 2-го игрока
+					connectionLost = 0;
+					// мы являемся сервером
+					appType = SERVER_APPLICATION;
+				}
+			}
+		}
+    }
+}
+
+/**
+ * Linux
+ *
+ * Подключение к серверу клиента 2 игрока
+ * host - хост на котором работает сервер
+ * port - порт на катором работает сервер
+ */
+void pacmanClientLinux(char * host, char * port) {
+	printf("Порт: '%s' Хост: '%s'\n", port, host);
+	// порт сервера на который ждем подключение клиента
+	int serverPort;
+	// структура содержащая адрес сервера
+	struct sockaddr_in serverAddress;
+	// структура содержащая адрес клиента
+	struct sockaddr_in clientAddress;
+	// хост сервера
+	struct hostent *server;
+
+	serverPort = atoi(port);
+
+	// Создаем сокет для отправки сообщений
+	clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+	if (clientSocket < 0) {
+		printf("\nERROR socket - ошибка открытия сокета\n");
+	} else {
+		// получаем хост по имени или ip
+		server = gethostbyname(host);
+		if (server == NULL) {
+			printf("\nERROR gethostbyname - хост не найден\n");
+		} else {
+			bzero((char *) &serverAddress, sizeof(serverAddress));
+			serverAddress.sin_family = AF_INET;
+			bcopy((char *)server->h_addr, (char *)&serverAddress.sin_addr.s_addr, server->h_length);
+			serverAddress.sin_port = htons(serverPort);
+			if (connect(clientSocket,(struct sockaddr *) &serverAddress,sizeof(serverAddress)) < 0) {
+				printf("\nERROR connect - ошибка при создании соединения\n");
+			} else {
+				// переводим сокет в не блокирующий режим
+				fcntl(clientSocket, F_SETFL, O_NONBLOCK);
+				// клиент 2-го игрока успешно соединился с сервером
+				connectionLost = 0;
+				// мы являемся клиентом
+				appType = CLIENT_APPLICATION;
+			}
+		}
+	}
+}
+
+/**
+ * Linux
+ * Читает клиентом 2 игрока данные из сокета переданные сервером
+ * 1 игрока в глобальную переменную buffer (не пересаоздаем его всевремя)
+ * а из нее потом все перекладывается в остальные  переменные
+ */
+void readClientFromSocketLinux() {
+	fd_set readset;
+	FD_ZERO(&readset);
+	FD_SET(clientSocket, &readset);
+
+    // Задаём таймаут
+    timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 150;
+
+    // проверяем можно ли что то прочитать из сокета
+    int n = select(clientSocket+1, &readset, NULL, NULL, &timeout);
+    if (n > 0 && FD_ISSET(clientSocket, &readset)) {
+    	// очищаем буфер
+    	bzero(buffer, 256);
+
+    	// читоаем из сокета
+		n = read(clientSocket, buffer, 255);
+		if (n < 1) {
+			printf("\nread - error!\n Сервер разорвал соединение!\nGame Over!\n");
+			connectionLost = 1;
+		} else {
+			int i=0;
+
+			pacmanX = bufferToInt(&i);
+			pacmanY = bufferToInt(&i);
+			oldX = bufferToInt(&i);
+			oldY = bufferToInt(&i);
+			dx = bufferToInt(&i);
+			dy = bufferToInt(&i);
+			redX = bufferToInt(&i);
+			redY = bufferToInt(&i);
+			oldXRed = bufferToInt(&i);
+			oldYRed = bufferToInt(&i);
+			oldRedVal = bufferToInt(&i);
+			dxRed = bufferToInt(&i);
+			dyRed = bufferToInt(&i);
+			pacGirlX = bufferToInt(&i);
+			pacGirlY = bufferToInt(&i);
+			oldPacGirlX = bufferToInt(&i);
+			oldPacGirlY = bufferToInt(&i);
+			dxPacGirl = bufferToInt(&i);
+			dyPacGirl = bufferToInt(&i);
+			cherryX = bufferToInt(&i);
+			cherryY = bufferToInt(&i);
+			doorX = bufferToInt(&i);
+			doorY = bufferToInt(&i);
+			redFlag = bufferToInt(&i);
+			refreshDoor = bufferToInt(&i);
+			refreshCherry = bufferToInt(&i);
+			score = bufferToInt3(&i);
+			redBonus = bufferToInt3(&i);
+			powerBonus = bufferToInt3(&i);
+			cherryBonus = bufferToInt3(&i);
+			foodToWIN = bufferToInt3(&i);
+			doorVal = buffer[i++];
+			cherryVal = buffer[i++];
+			map[pacGirlY][pacGirlX] = buffer[i++];
+		}
+    }
+}
+
+/**
+ * Linux
+ * Cоздает пакет с данными о положении персонажей
+ * для отправки с сервера клиенту 2-го игрока
+ *
+ * отправляет через интерфейс сокетов сформерованный пакет
+ * данные записываются в глобальный массив buffer
+ * затем записываются в сокет
+ */
+void writeServerInSocketLinux() {
+	// очищаем буфер
+	bzero(buffer, 256);
+
+	int i=0;
+	intToBuffer(pacmanX, &i);
+	intToBuffer(pacmanY, &i);
+	intToBuffer(oldX, &i);
+	intToBuffer(oldY, &i);
+	intToBuffer(dx, &i);
+	intToBuffer(dy, &i);
+	intToBuffer(redX, &i);
+	intToBuffer(redY, &i);
+	intToBuffer(oldXRed, &i);
+	intToBuffer(oldYRed, &i);
+	intToBuffer(oldRedVal, &i);
+	intToBuffer(dxRed, &i);
+	intToBuffer(dyRed, &i);
+	intToBuffer(pacGirlX, &i);
+	intToBuffer(pacGirlY, &i);
+	intToBuffer(oldPacGirlX, &i);
+	intToBuffer(oldPacGirlY, &i);
+	intToBuffer(dxPacGirl, &i);
+	intToBuffer(dyPacGirl, &i);
+	intToBuffer(cherryX, &i);
+	intToBuffer(cherryY, &i);
+	intToBuffer(doorX, &i);
+	intToBuffer(doorY, &i);
+	intToBuffer(redFlag, &i);
+	intToBuffer(refreshDoor, &i);
+	intToBuffer(refreshCherry, &i);
+	intToBuffer3(score, &i);
+	intToBuffer3(redBonus, &i);
+	intToBuffer3(powerBonus, &i);
+	intToBuffer3(cherryBonus, &i);
+	intToBuffer3(foodToWIN, &i);
+	buffer[i++] = map[doorY][doorX];
+	buffer[i++] = map[cherryY][cherryX];
+	buffer[i++] = map[pacGirlY][pacGirlX];
+
+	// записываем buffer в сокет (отправляем 2-му игроку)
+	int n = write(clientSocket, buffer, 255);
+
+	if (n < 0) {
+		printf("\nERROR write - ошибка записи в сокет!\n");
+		connectionLost = 1;
+	}
+
+}
+
+/**
+ * Linux
+ * Отправляет на сервер данные с клиента 2-го игрока
+ * шлем на сервер только нажатую на клавиатуре кнопку
+ * 2м игроком
+ */
+void writeClientInSocketLinux() {
+	// очищаем буфер
+	bzero(buffer, 256);
+	int i=0;
+	// с клиента 2-го игрока на сервер отправляем
+	// только нажатую кнопку на клавиатуре
+	buffer[i++] = player2PressKey;
+
+	// записываем buffer в сокет (отправляем на Сервер)
+	int n = write(clientSocket, buffer, 1);
+
+	if (n < 0) {
+		printf("\nERROR write - ошибка записи в сокет!\n");
+		connectionLost = 1;
+	}
+
+}
+
+/**
+ * Linux
+ * Читаем на сервере данные посланные с клиента 2го игрока
+ * какую кнопку на клавиатуре он нажал
+ */
+void readServerFromSocketLinux() {
+	fd_set readset;
+	FD_ZERO(&readset);
+	FD_SET(clientSocket, &readset);
+
+    // Задаём таймаут
+    timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 150;
+
+    // проверяем надо ли читать данные из сокета
+    int n = select(clientSocket+1, &readset, NULL, NULL, &timeout);
+    if (n > 0 && FD_ISSET(clientSocket, &readset)) {
+    	// очищаем буфер
+    	bzero(buffer, 256);
+    	// читоаем из сокета данные
+		n = read(clientSocket, buffer, 1);
+		if (n < 1) {
+			printf("\nread - error!\n 2 игрок разорвал соединение!\n");
+			getchar();
+			connectionLost = 1;
+		} else {
+			int i=0;
+			// запоминаем какую кнопку нажал 2 ой игрок
+			player2PressKey = buffer[i++];
+		}
+    }
+}
+
+
+/**
+ * Linux
+ *
+ * Закрыть сокеты
+ */
+void closeSocketsLinux() {
+	if (appType == SERVER_APPLICATION) {
+	     // закрываем сокеты
+	     close(clientSocket);
+	     close(serverSocket);
+	} else if (appType == CLIENT_APPLICATION) {
+		 close(clientSocket);
+	}
+}
+
+
+
 /**
  *
  * Linux
@@ -759,6 +1237,9 @@ long long current_timestamp() {
     return milliseconds;
 }
 
+/**
+ * Тут идут функции только для DOS
+ */
 #else
 /** DOS **/
 /* Установить разрешение 320 x 200 с 16 цетами 
@@ -1772,93 +2253,43 @@ void setBackStartVideoMode(int old_apage,int old_vpage) {
 
 
 /**
- * Определяем количество очков для победы
+ * Начальные настройки по карте
+ * 1. Время начала игры
+ * 2. Определяем количество очков для победы
+ * 3. Начальное положение персонажей
  */
-void scoreForWin() {
+void init() {
+    // запоминаем время начала игры
+    startTime = current_timestamp();
+
+    pacmanLastUpdateTime = startTime;
+    redLastUpdateTime = startTime;
+    pacGirlLastUpdateTime = startTime;
+    redTime = startTime;
+
     for (int i = 0; i < mapSizeX; i++) {
         for (int j =0; j < mapSizeY ; j++) {
             // надо съесть поверапы и всю еду
             if (map[i][j] == FOOD || map[i][j] == POWER_FOOD) {
+                // сколько очков нужно для выигрыша
                 foodToWIN++;
             }
         }
     }
-}
 
-
-int pacManState() {
-    // проверяем, у PACMAN задоно ли направление движения
-    if (dx!=0 || dy!=0) {
-        long t = current_timestamp();
-
-        // должен ли PACMAN переместиться на новую клетку
-        if (t-pacmanLastUpdateTime > PACMAN_SPEED) {
-            pacmanX=pacmanX+dx;
-            pacmanY=pacmanY+dy;
-
-            // запоминаем время перехода на новую клетку
-            pacmanLastUpdateTime = t;
-
-            // корректируем координаты PACMAN если надо (чтоб не вышел с поля)
-            moveBound(&pacmanX, &pacmanY);
-
-            // если текущая клетка с едой, увиличиваем счетчик съеденного
-            if (map[pacmanY][pacmanX] == FOOD) {
-               score++;
-            } else if (map[pacmanY][pacmanX] == POWER_FOOD) {
-                // RED становится съедобным
-                redFlag = 0;
-                // бежит в обратную сторону
-                dxRed=-1*dxRed;
-                dyRed=-1*dyRed;
-                // запоминаем время когда RED стал съедобным
-                redTime = current_timestamp();
-                // за POWER_FOOD тоже точка
-                score++;
-                // и даем еще бонус
-                powerBonus+=SCORE_POWER_BONUS;
-            } else if (map[pacmanY][pacmanX] == CHERRY) {
-                cherryBonus+=SCORE_CHERY_BONUS;
-            }
-
-
-            if (isNotWellOrDoor(pacmanY, pacmanX)) {
-                // если в новой клетке не дверь то в старой делаем пустую клетку
-                map[oldY][oldX]=EMPTY;
-            } else {
-                // если в новой клетке стена WALL или дверь DOOR
-                // остаемся на прошлой клетке
-                pacmanY = oldY;
-                pacmanX = oldX;
-                // вектор движения сбрасываем (PACMAN останавливается)
-                dx=0;
-                dy=0;
-            }
-
-            // рисуем пакмена в координатах текущей клетки карты
-            map[pacmanY][pacmanX] = PACMAN;
-
-            // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
-            if (score >= foodToWIN) {
-                // TODO showMap();
-                setBackStartVideoMode(old_apage, old_vpage);
-                printf("\n          Pac-Man WINER !!!\n");
-                return 0;
-            }
-
-
-            // сеъеи ли PACMAN привидение (или оно нас)
-            if (pacmanLooser()) {
-                setBackStartVideoMode(old_apage, old_vpage);
-                return 0;
-            }
-
-        }
-
+    map[pacmanY][pacmanX] = PACMAN;
+    map[redY][redX] = RED;
+    if (appType == SERVER_APPLICATION) {
+    	map[pacGirlY][pacGirlX] = PACGIRL;
+    	score++;
     }
-    return 1;
 }
 
+/**
+ * Алгоритм призрака гоняющегося за PACMAN
+ * return 0 - Конец игры
+ *        1 - PACMAN еще жив
+ */
 int redState() {
     // проверяем, у RED задоно ли направление движения
     if (dxRed!=0 || dyRed!=0) {
@@ -1977,7 +2408,6 @@ int redState() {
 
             // сеъеи ли PACMAN привидение (или оно нас)
             if (pacmanLooser()) {
-                setBackStartVideoMode(old_apage, old_vpage);
                 return 0;
             }
         }
@@ -1993,7 +2423,176 @@ int redState() {
     return 1;
 }
 
+/**
+* Создание сервера первого игрока
+* port - порт на катором поднимется сервер
+*/
+void pacmanServer(char * port) {
+	#ifdef __linux__
+		pacmanLinuxServer(port);
+	#else
+	 	 // TODO реализация для DOS
+	#endif
+}
 
+/**
+ * Подключение к серверу клиента 2 игрока
+ * host - хост на котором работает сервер
+ * port - порт на катором работает сервер
+ */
+void pacmanClient(char * host,  char * port) {
+	#ifdef __linux__
+		pacmanClientLinux(host, port);
+	#else
+		 // TODO реализация для DOS
+	#endif
+}
+
+
+/**
+ * Читает клиентом 2 игрока данные из сокета переданные сервером
+ * 1 игрока в глобальную переменную buffer (не пересаоздаем его всевремя)
+ * а из нее потом все перекладывается в остальные переменные
+ */
+void readClientFromServerFromSocket() {
+	#ifdef __linux__
+		readClientFromSocketLinux();
+	#else
+		 // TODO реализация для DOS
+	#endif
+}
+
+/**
+ * Cоздает пакет с данными о положении персонажей
+ * для отправки с сервера клиенту 2-го игрока
+ *
+ * отправляет через интерфейс сокетов сформерованный пакет
+ * данные записываются в глобальный массив buffer
+ * затем записываются в сокет
+ */
+void writeServerToClientInSocket() {
+	#ifdef __linux__
+		writeServerInSocketLinux();
+	#else
+		 // TODO реализация для DOS
+	#endif
+}
+
+/**
+ * Отправляет на сервер данные с клиента 2-го игрока
+ * шлем на сервер только нажатую на клавиатуре кнопку
+ * 2м игроком
+ */
+void writeClientInSocket() {
+	#ifdef __linux__
+		writeClientInSocketLinux();
+	#else
+		 // TODO реализация для DOS
+	#endif
+}
+
+/**
+ * Читаем на сервере данные посланные с клиента 2го игрока
+ * какую кнопку на клавиатуре он нажал
+ */
+void readServerFromSocket() {
+	#ifdef __linux__
+		readServerFromSocketLinux();
+	#else
+		 // TODO реализация для DOS
+	#endif
+}
+
+/**
+ * Закрыть сокеты
+ */
+void closeSockets() {
+	#ifdef __linux__
+		closeSocketsLinux();
+	#else
+		 // TODO реализация для DOS
+	#endif
+}
+
+/**
+ * Алгоритм обработки движения PACMAN на карте
+ * return 0 - Конец игры
+ *        1 - PACMAN еще жив
+ */
+int pacManState() {
+    // проверяем, у PACMAN задоно ли направление движения
+    if (dx!=0 || dy!=0) {
+        long t = current_timestamp();
+
+        // должен ли PACMAN переместиться на новую клетку
+        if (t-pacmanLastUpdateTime > PACMAN_SPEED) {
+            pacmanX=pacmanX+dx;
+            pacmanY=pacmanY+dy;
+
+            // запоминаем время перехода на новую клетку
+            pacmanLastUpdateTime = t;
+
+            // корректируем координаты PACMAN если надо (чтоб не вышел с поля)
+            moveBound(&pacmanX, &pacmanY);
+
+            // если текущая клетка с едой, увиличиваем счетчик съеденного
+            if (map[pacmanY][pacmanX] == FOOD) {
+               score++;
+            } else if (map[pacmanY][pacmanX] == POWER_FOOD) {
+                // RED становится съедобным
+                redFlag = 0;
+                // бежит в обратную сторону
+                dxRed=-1*dxRed;
+                dyRed=-1*dyRed;
+                // запоминаем время когда RED стал съедобным
+                redTime = current_timestamp();
+                // за POWER_FOOD тоже точка
+                score++;
+                // и даем еще бонус
+                powerBonus+=SCORE_POWER_BONUS;
+            } else if (map[pacmanY][pacmanX] == CHERRY) {
+                cherryBonus+=SCORE_CHERY_BONUS;
+            }
+
+
+            if (isNotWellOrDoor(pacmanY, pacmanX)) {
+                // если в новой клетке не дверь то в старой делаем пустую клетку
+                map[oldY][oldX]=EMPTY;
+            } else {
+                // если в новой клетке стена WALL или дверь DOOR
+                // остаемся на прошлой клетке
+                pacmanY = oldY;
+                pacmanX = oldX;
+                // вектор движения сбрасываем (PACMAN останавливается)
+                dx=0;
+                dy=0;
+            }
+
+            // рисуем пакмена в координатах текущей клетки карты
+            map[pacmanY][pacmanX] = PACMAN;
+
+            // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
+            if (score >= foodToWIN) {
+                return 0;
+            }
+
+
+            // сеъеи ли PACMAN привидение (или оно нас)
+            if (pacmanLooser()) {
+                return 0;
+            }
+
+        }
+
+    }
+    return 1;
+}
+
+/**
+ * Алгоритм обработки движения PACGIRL на карте
+ * return 0 - Конец игры
+ *        1 - PACMAN еще жив
+ */
 int pacGirlState() {
     // проверяем, у pacGirl задоно ли направление движения
     if (dxPacGirl!=0 || dyPacGirl!=0) {
@@ -2047,15 +2646,11 @@ int pacGirlState() {
 
             // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
             if (score >= foodToWIN) {
-                // TODO showMap();
-                setBackStartVideoMode(old_apage, old_vpage);
-                printf("\n          Pac-Girl WINER !!!\n");
                 return 0;
             }
 
             // сеъеи ли PACMAN привидение (или оно нас)
             if (pacmanLooser()) {
-                setBackStartVideoMode(old_apage, old_vpage);
                 return 0;
             }
         }
@@ -2064,133 +2659,329 @@ int pacGirlState() {
     return 1;
 }
 
-int main() {    
+/**
+ * Обработка на Сервере нажатых кнопок 2 игроком
+ * в своем клиенте
+ */
+void player2() {
+	// сбрасываем значение ранее нажатой кнопки
+	player2PressKey = EMPTY;
+	// пробуем прочитать данные из сокета
+	readServerFromSocket();
+	switch (player2PressKey) {
+		// key UP
+		case 65: // Linux
+		case 72: // DOS
+			dyPacGirl = -1;
+			dxPacGirl = 0;
+			break;
+		// key DOWN
+		case 66: // Linux
+		case 80: // DOS
+			dyPacGirl = 1;
+			dxPacGirl = 0;
+			break;
+		// key LEFT
+		case 68: // Linux
+		case 75: // DOS
+			dxPacGirl = -1;
+			dyPacGirl = 0;
+			break;
+		// key RIGHT
+		case 67: // Linux
+		case 77: // DOS
+			dxPacGirl = 1;
+			dyPacGirl = 0;
+		break;
+	}
+}
+
+/**
+ * Обработка нажатых кнопок на Сервере 1 игроком
+ * с сервера можно управлять обоими персонажами
+ * Pac-Man : стрелочки
+ * Pac-Girl:
+ * 		a - влево
+ * 		s - вниз
+ * 		d - вправо
+ * 		w - вверх
+ */
+void player1(int ch) {
+	switch (ch) {
+	// key UP
+	case 65: // Linux
+	case 72: // DOS
+		dy = -1;
+		dx = 0;
+		break;
+	case 119:
+		dyPacGirl = -1;
+		dxPacGirl = 0;
+		break;
+		// key DOWN
+	case 66: // Linux
+	case 80: // DOS
+		dy = 1;
+		dx = 0;
+		break;
+	case 115:
+		dyPacGirl = 1;
+		dxPacGirl = 0;
+		break;
+		// key LEFT
+	case 68: // Linux
+	case 75: // DOS
+		dx = -1;
+		dy = 0;
+		break;
+	case 97:
+		dxPacGirl = -1;
+		dyPacGirl = 0;
+		break;
+		// key RIGHT
+	case 67: // Linux
+	case 77: // DOS
+		dx = 1;
+		dy = 0;
+		break;
+	case 100:
+		dxPacGirl = 1;
+		dyPacGirl = 0;
+		break;
+	}
+}
+
+/**
+ * Обновить карту / персонажей, двери, черешню
+ * для Серверной, Одиночной, Кооперативной игры
+ */
+void refreshSingleGame() {
+	if (!cherryFlag && redFlag && !cherryBonus
+			&& current_timestamp() - startTime > CHERRY_TIME) {
+		openDoors();
+	}
+	// надо ли перерисовать карту
+	if (oldX != pacmanX || oldY != pacmanY || oldXRed != redX || oldYRed != redY
+			|| oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
+		// если игра сетевая, надо отправить данные о карте
+		// 2у игроку, для чего записываем данные в сокет
+		if (appType == SERVER_APPLICATION && !connectionLost) {
+			writeServerToClientInSocket();
+		}
+		refreshMap();
+	}
+	// надо ли RED перейти в режим погони
+	if (redFlag == 0 && (current_timestamp() - redTime > RED_TIME)) {
+		redFlag = 1;
+		if (dyRed == 0 && dxRed == 0) {
+			dyRed = -1;
+		}
+	}
+	// запоминаем текущие координаты PACMAN
+	oldX = pacmanX;
+	oldY = pacmanY;
+	// запоминаем текущие координаты RED
+	oldXRed = redX;
+	oldYRed = redY;
+	// запоминаем текущие координаты PACGIRL
+	oldPacGirlX = pacGirlX;
+	oldPacGirlY = pacGirlY;
+}
+
+/**
+ * Обновить карту / персонажей, двери, черешню
+ * для игры 2 игроком на клиенте с другого компьютера
+ */
+void refreshClientGame() {
+	map[oldY][oldX] = EMPTY;
+	map[pacmanY][pacmanX] = PACMAN;
+	if (redFlag) {
+		map[oldYRed][oldXRed] = oldRedVal;
+		map[redY][redX] = RED;
+	} else {
+		map[oldYRed][oldXRed] = oldRedVal;
+		map[redY][redX] = SHADOW;
+	}
+	if (pacGirlY != oldPacGirlY || pacGirlX != oldPacGirlX) {
+		map[oldPacGirlY][oldPacGirlX] = EMPTY;
+	}
+	if (refreshDoor) {
+		map[doorY][doorX] = doorVal;
+	}
+	if (refreshCherry) {
+		map[cherryY][cherryX] = cherryVal;
+	}
+	map[pacGirlY][pacGirlX] = PACGIRL;
+	if (oldX != pacmanX || oldY != pacmanY || oldXRed != redX || oldYRed != redY
+			|| oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
+		refreshMap();
+		// запоминаем текущие координаты PACMAN
+		oldX = pacmanX;
+		oldY = pacmanY;
+		// запоминаем текущие координаты RED
+		oldXRed = redX;
+		oldYRed = redY;
+		// запоминаем текущие координаты PACGIRL
+		oldPacGirlX = pacGirlX;
+		oldPacGirlY = pacGirlY;
+	}
+}
+
+/**
+ *  Основной цикл игры
+ *  для игры 2 игроком на клиенте с другого компьютера
+ *  в сетевом режиме
+ *   	appType == CLIENT_APPLICATION
+ */
+int gameClientMode() {
+	// нажатая клавиша на клавиатуре
+	int ch;
+
+	do {
+		// читаем данные о карте / персонажах с сервера
+		readClientFromServerFromSocket();
+
+		if (connectionLost) {
+			// если соединение потеряно, завершаем игру
+			return 0;
+		}
+
+		// обновляем карту и все элементы какие нужно на экране
+		refreshClientGame();
+
+		if (kbhit()) {
+			// оределяем какая кнопка нажата
+			ch = getch(); // Linux getchar() ;
+			if (ch == 0)
+				ch = getch(); // only DOS
+			player2PressKey = ch;
+
+			writeClientInSocket();
+
+			if (connectionLost) {
+				// если соединение потеряно, завершаем игру
+				return 0;
+			}
+		}
+	} while (ch != 'q');
+	return 1;
+}
+/**
+ *  Основной цикл игры
+ *  для одинойной или кооперативной игры на одном компьютере
+ *      appType == SINGLE_APPLICATION
+ *  или 1 игроком на сервере в сетевом режиме
+ *   	appType == SERVER_APPLICATION
+ */
+int game() {
+	// нажатая клавиша на клавиатуре
+	int ch;
+	do {
+		// обновить карту / персонажей на экране
+		refreshSingleGame();
+
+		// проверяем нажата ли кнопка
+		if (kbhit()) {
+
+			// оределяем какая кнопка нажата
+			ch = getch(); // Linux getchar() ;
+			if (ch == 0) ch = getch(); // only DOS
+
+			// Обработка нажатых кнопок
+			// в оденочной игре или в кооперативной с одного компьютера
+			// и на Сервере 1 игроком при сетевой игре
+			// в этом режиме можно управлять обоими персонажами
+			player1(ch);
+		}
+
+		if (appType == SERVER_APPLICATION && !connectionLost) {
+			// Если игра сетевая, нужно обработать нажатые 2м пользователем
+			// в своем клиенте кнопки сервером, для этого
+			// надо прочитать данные из сокета и обработать
+			player2();
+		}
+
+
+		/** Pac-Man **/
+		if (!pacManState()) {
+			return 0;
+		}
+
+
+		/** RED */
+		if (!redState()) {
+			return 0;
+		}
+
+		/** Pac-Girl **/
+		if (!pacGirlState() ) {
+			return 0;
+		}
+
+	// Выход из игры 'q'
+	} while(ch != 'q');
+
+	return 1;
+}
+
+int main(int argc, char *argv[]) {
+   if (argc == 2) {
+		// запущен как сервер
+	    printf("Запущен как сервер, жду подключения 2го игрока!\n");
+		pacmanServer(argv[1]);
+		if (appType == SERVER_APPLICATION) {
+			printf("2 игрок подключился, нажмити любую клавишу!\n");
+		} else {
+			printf("Не удалось создать сервер!\nНажмити любую клавишу для игры одному!\n");
+		}
+		getchar();
+	} else 	if (argc == 3) {
+		printf("Запущен как клиент\n");
+		// запущен как клиент
+		pacmanClient(argv[1], argv[2]);
+		if (appType == CLIENT_APPLICATION) {
+			printf("Вы подключилсь к серверу!\n");
+		} else {
+			printf("Не удалось подключится к серверу!\nНажмити любую клавишу для игры одному!\n");
+		}
+
+	}
+
     srand(time(NULL));
 
-    int ch;
-
-    startTime = current_timestamp();
-    pacmanLastUpdateTime = startTime;
-    redLastUpdateTime = startTime;
-    pacGirlLastUpdateTime = startTime;
-
-    redTime = startTime;
-    // сколько очков нужно для выигрыша
-    scoreForWin();
-
-    map[pacmanY][pacmanX] = PACMAN;
-    //map[pacGirlY][pacGirlX] = PACGIRL;
-    map[redY][redX] = RED;
+    // Начальные настройки по карте
+    init();
 
     // запомнить видеорежим
     videoMode();
+
+    // нарисовать карту и персонажей на экране
     showMap();
 
-    do {
+    if (appType == CLIENT_APPLICATION) {
+    	gameClientMode();
+    } else {
+    	game();
+    	// Надо обновить данные на клиенте 2го плеера
+		if (appType == SERVER_APPLICATION && !connectionLost) {
+			writeServerToClientInSocket();
+		}
+    }
 
+    // обновить карту и персонажей на экране
+    refreshMap();
 
-        if (!cherryFlag && redFlag && !cherryBonus && current_timestamp()-startTime > CHERRY_TIME) {
-            openDoors();
-        }
-
-
-        // надо ли перерисовать карту
-        if (oldX != pacmanX || oldY != pacmanY || oldXRed != redX || oldYRed != redY || oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
-            refreshMap();
-        }
-
-        // надо ли RED перейти в режим погони
-        if (redFlag == 0 && (current_timestamp()-redTime > RED_TIME)) {
-            redFlag = 1;
-            if (dyRed == 0 && dxRed == 0) {
-                dyRed=-1;
-            }
-        }
-
-
-        // запоминаем текущие координаты PACMAN
-        oldX = pacmanX;
-        oldY = pacmanY;
-
-        // запоминаем текущие координаты RED
-        oldXRed = redX;
-        oldYRed = redY;
-
-        // запоминаем текущие координаты PACGIRL
-        oldPacGirlX = pacGirlX;
-        oldPacGirlY = pacGirlY;
-
-        // проверяем нажата ли кнопка
-        if (kbhit()) {
-
-            // оределяем какая кнопка нажата
-            ch = getch(); // Linux getchar() ;
-            if (ch == 0) ch = getch(); // only DOS
-            switch(ch)
-            {
-                // key UP
-                case 65:  // Linux
-                case 72:  // DOS
-                    dy=-1;
-                    dx=0;
-                    break;
-                case 119:
-                	dyPacGirl=-1;
-                	dxPacGirl=0;
-                	break;
-                // key DOWN
-                case 66:  // Linux
-                case 80:  // DOS
-                    dy=1;
-                    dx=0;
-                    break;
-                case 115:
-                	dyPacGirl=1;
-                	dxPacGirl=0;
-                	break;
-                // key LEFT
-                case 68:  // Linux
-                case 75:  // DOS
-                    dx=-1;
-                    dy=0;
-                    break;
-                case 97:
-                	dxPacGirl=-1;
-                	dyPacGirl=0;
-                	break;
-                // key RIGHT
-                case 67:  // Linux
-                case 77:  // DOS 
-                    dx=1;
-                    dy=0;
-                    break;
-                case 100:
-                	dxPacGirl=1;
-                	dyPacGirl=0;
-                	break;
-            }
-        }
-
-        /** Pac-Man **/
-        if(!pacManState()) {
-        	return 0;
-        }
-
-
-        /** RED */
-        if(!redState()) {
-        	return 0;
-        }
-
-        /** Pac-Girl **/
-        if(!pacGirlState() ) {
-        	return 0;
-        }
-
-
-    // Выход из игры 'q'
-    } while(ch != 'q');
-
+    // вернуть видеорежим
     setBackStartVideoMode(old_apage, old_vpage);
+
+    // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
+    if (score >= foodToWIN) {
+    	printf("\nPac-Man & Pac-Girl WINER !!!\n");
+    } else {
+    	printf("\nPac-Man - LOOSER OWNED BY SPIRIT :(\n");
+    }
+
+    // закрыть сокеты
+    closeSockets();
     return 0;
 }
