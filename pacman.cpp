@@ -1,6 +1,6 @@
 /**
-Super Turbo Net Pac-Man
-реализация Pac-Man для DOS и GNU/Linux
+Super Turbo NET Pac-Man v1.3
+реализация Pac-Man для DOS (IBM PC XT Intel 8088) и GNU/Linux
 
 Для Linux собирается gcc
 > gcc pacman.cpp
@@ -29,17 +29,27 @@ http://brutmanlabs.org/mTCP/
 
 // Linux
 #ifdef __linux__
-#include <sys/time.h>
+#include <sys/time.h>   //gettime
 #include <termios.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
+#include <sys/types.h>  // TCP/IP
+#include <sys/socket.h> // TCP/IP
+#include <netinet/in.h> // TCP/IP
+#include <netdb.h>      // TCP/IP 
 #else
 // DOS
-#include <dos.h>   // _dos_gettime
-#include <conio.h> // kbhit
-#include <graph.h> // 2D graphics 
+#include <dos.h>      	// gettime
+#include <conio.h>    	// kbhit
+#include <graph.h>    	// 2D graphics 
+#include <malloc.h>   	// malloc / free 
+#include <bios.h>     	// mTCP keybord handlers
+#include <io.h>       	// open file
+#include "types.h"    	// mTCP
+#include "packet.h"   	// mTCP
+#include "arp.h"      	// mTCP
+#include "udp.h"      	// mTCP
+#include "dns.h"      	// mTCP
+#include "tcp.h"      	// mTCP
+#include "tcpsockm.h" 	// mTCP
 #endif
 
 // скорость перехода pacman с одной клетки на другую в милисекундах
@@ -64,12 +74,6 @@ const char PACMAN = 'O';
 const char PACGIRL = 'Q';
 // Красный призрак (SHADOW или BLINKY)
 const char RED    = '^';
-// Розовый призрак (SPEEDY или PIKKEY)
-const char PINK   = '<';
-// Голубой призрак (BASHFUL или INKY)
-const char BLUE  = '>';
-// Желтый призрак (POKEY или CLYDE)
-const char YELOW  = '$';
 // Красный призрак когда его можно съесть (SHADOW или BLINKY)
 const char SHADOW = '@';
 // Вишня
@@ -84,70 +88,6 @@ const int SCORE_CHERY_BONUS = 200;
 const int SCORE_POWER_BONUS = 25;
 // количество очков за поедание RED
 const int SCORE_RED_EAT = 50;
-// черный цвет
-const int COLOR_BLACK = 0;
-// синий цвет
-const int COLOR_BLUE = 1;
-// зеленый цвет
-const int COLOR_GREEN = 2;
-// голубой цвет
-const int COLOR_LIGHT_BLUE = 3;
-// красный цвет
-const int COLOR_RED = 4;
-// пурпурный цвет
-const int COLOR_PURPLE = 5;
-// коричневый цвет
-const int COLOR_BROWN = 6;
-// берюзовый цвет
-const int COLOR_TURQUOISE = 11;
-// желтый цвет
-const int COLOR_YELLOW = 14;
-// белый цвет
-const int COLOR_WHITE = 15;
-// Стена - угол верх лево полный
-const char WALL_7 = '7';
-// Стена - верхняя
-const char WALL_8 = '8';
-// Стена - угол верх право полный
-const char WALL_9 = '9';
-// Стена - левая
-const char WALL_4 = '4';
-// Стена - полная
-const char WALL_5 = '5';
-// Стена - правая
-const char WALL_6 = '6';
-// Стена - угол низ лево полная
-const char WALL_1 = '1';
-// Стена - угол низ право полная
-const char WALL_3 = '3';
-// Стена - низ узкая
-const char WALL_2 = '2';
-// Стена - скругление низ лево
-const char WALL_0 = '0';
-// Стена - скругление низ право
-const char WALL_I = 'i';
-// Стена - скругление верх лево
-const char WALL_L = 'l';
-// Стена - скругление верх право
-const char WALL_D = 'd';
-// Стена - низ полная
-const char WALL_X = 'x';
-// Стена - скругление низ лево полная
-const char WALL_J  = 'j';
-// Стена - скругление низ право полная
-const char WALL_F = 'f';
-// Стена - угол низ лево
-const char WALL_S = 's';
-// Стена - угол низ право
-const char WALL_E = 'e';
-// Стена - угол верх право
-const char WALL_M = 'm';
-// Стена - угол верх лево
-const char WALL_N = 'n';
-// Стена - угол низ право тонкий
-const char WALL_Y = 'y';
-// Стена - угол низ лево тонкий
-const char WALL_Z = 'z';
 // не сетевая игра
 const int SINGLE_APPLICATION = 0;
 // игровой сервер 1-го игрока
@@ -155,21 +95,13 @@ const int SERVER_APPLICATION = 1;
 // клиент 2-го игрока
 const int CLIENT_APPLICATION = 2;
 
-// серверный socket - ждет подключения клиентов
-// использует только сервер
-int serverSocket;
-
-// клиентский socket
-// запустились как сервер или как клиент 2-го игрока
-// всегда в этот сокет пишем или читаем данные
-// отправить на сервер / клиент 2-го игрока
-// прочитать данные на сервере / клиенте 2-го игрока
-int clientSocket;
+// рамер буфера для сетевого взаимдействия
+#define RECV_BUFFER_SIZE (1024)
 
 // массив для сетевого взаимодействия
 // весь обмен идет через него в функциях записи / чтения
 // четез интерфейс сокетов
-char buffer[256];
+unsigned char buffer[RECV_BUFFER_SIZE];
 
 // кнопка нажатая 2 игроком на клиенте 2-го игрока
 char player2PressKey;
@@ -285,11 +217,6 @@ int powerBonus = 0;
 // бонус за съеденные вишни
 int cherryBonus = 0;
 
-// размер карты по x
-int mapSizeX = 23;
-// размер карты по y
-int mapSizeY = 32;
-
 // количество FOOD и POWER_FOOD которое нужно съесть чтоб выиграть
 int foodToWIN = 0;
 
@@ -305,426 +232,81 @@ long redLastUpdateTime;
 // время последнего обновления положения pacGirl
 long pacGirlLastUpdateTime;
 
-// карта
-char map[23][32] = {
+// размер карты по x
+#define MAP_SIZE_Y (23)
+// размер карты по y
+#define MAP_SIZE_X (32)
+
+// карта занружается из файла MAP.TXT
+char map[MAP_SIZE_Y][MAP_SIZE_X]; 
+
+/**
+ * Пример карты 
+= {
     "7888888888888895788888888888889",
     "4.............654.............6",
     "4*i220.i22220.l8d.i22220.i220*6",
-    "4.............................6",
+    "4..............Q..............6",
     "4.i220.fxj.i22mxn220.fxj.i220.6",
     "4......654....654....654......6",
     "1xxxxj.65s220.l8d.222e54.fxxxx3",
     "555554.654...........654.655555",
     "555554.654.fxxj-fxxj.654.655555",
     "88888d.l8d.678d l894.l8d.l88888",
-    "...........64     64...........",
+    "...........64  %  64..^........",
     "xxxxxj.fxj.61xxxxx34.fxj.fxxxxx",
     "555554.654.l8888888d.654.655555",
     "555554.654...........654.655555",
     "78888d.l8d.i22mxn220.l8d.l88889",
     "4.............654.............6",
     "4.i2mj.i22220.l8d.i22220.fn20.6",
-    "4*..64...................64..*6",
+    "4*..64.........O.........64..*6",
     "s20.ld.fxj.i22mxn220.fxj.ld.i2e",
     "4......654....654....654......6",
     "4.i2222y8z220.l8d.i22y8z22220.6",
     "4.............................6",
     "1xxxxxxxxxxxxxxxxxxxxxxxxxxxxx3",
     };
+*/
 
 /**
- * Спрайт pac-man
- * 1 вид
+ * Количество изображений спрайтов загруженных для частой перерисовки
  */
-char SPRITE_PACMAN_LEFT1[11][12] = {
-        "00011111000",
-        "00111111100",
-        "01111111110",
-        "00011111111",
-        "00000111111",
-        "00000001111",
-        "00000111111",
-        "00011111111",
-        "01111111110",
-        "00111111100",
-        "00011111000",
-    };
+#define IMAGES_SIZE (34)
 
 /**
- * Спрайт pac-man
- * 2 вид
+ * Изображение спрайтов 
+ *
+ * Спрайты заружаются из файлов:
+ * S10.TXT - Спрайт вишни
+ * S11.TXT - Спрайт для еды
+ * S12.TXT - Спрайт для пустой клетки
+ * S13.TXT - Спрайт для поверапа
+ * S14.TXT - S22.TXT - Спрайты pac-man (И pac-girl)
+ * S23.TXT - S30.TXT - Спрайты red (красный призрак)
+ * S31.TXT - S32.TXT - Спрайты shadow (котороо можно есть)
+ * S33.TXT - Спрайт двери
+ * S34.TXT - S43.TXT - Спрайты pac-girl
+ * 
+ * W1.TXT - WZ.TXT - спрайты стен (НЕ ХРАНЯТСЯ В ЭТОЙ ПЕРЕМЕННОЙ)
+ *
+ * значения цветов в файлах спрайтов
+ * 0  - черный цвет
+ * 1  - синий цвет
+ * 2  - зеленый цвет
+ * 4  - красный цвет
+ * 5  - пурпурный цвет
+ * 6  - коричневый цвет
+ * 7  - серый цвет      
+ * 8  - желтый цвет (в DOS 14)
+ * 9  - белый цвет  (в DOS 15)
  */
-char SPRITE_PACMAN_LEFT2[11][12] = {
-        "00111111000",
-        "00011111100",
-        "00001111110",
-        "00000111111",
-        "00000011111",
-        "00000001111",
-        "00000011111",
-        "00000111111",
-        "00001111110",
-        "00011111100",
-        "00111111000",
-};
+char * images[IMAGES_SIZE];
 
 /**
- * Спрайт pac-man
- * 3 вид
+ * Количество видов стен загружаемых из файлов как спрайты
  */
-char SPRITE_PACMAN_FULL[11][12] = {
-        "00011111000",
-        "00111111100",
-        "01111111110",
-        "11111111111",
-        "11111111111",
-        "11111111111",
-        "11111111111",
-        "11111111111",
-        "01111111110",
-        "00111111100",
-        "00011111000",
-
-};
-
-/**
- * Спрайт pac-man
- * 4 вид
- */
-char SPRITE_PACMAN_RIGHT1[11][12] = {
-        "00011111000",
-        "00111111100",
-        "01111111110",
-        "11111111000",
-        "11111100000",
-        "11110000000",
-        "11111100000",
-        "11111111000",
-        "01111111110",
-        "00111111100",
-        "00011111000",
-    };
-
-/**
- * Спрайт pac-man
- * 5 вид
- */
-char SPRITE_PACMAN_RIGHT2[11][12] = {
-        "00011111100",
-        "00111111000",
-        "01111110000",
-        "11111100000",
-        "11111000000",
-        "11110000000",
-        "11111000000",
-        "11111100000",
-        "01111110000",
-        "00111111000",
-        "00011111100",
-};
-
-/**
- * Спрайт pac-man
- * 6 вид
- */
-char SPRITE_PACMAN_UP1[11][12] = {
-        "00000000000",
-        "00100000100",
-        "01100000110",
-        "11110001111",
-        "11110001111",
-        "11111011111",
-        "11111011111",
-        "11111111111",
-        "01111111110",
-        "00111111100",
-        "00011111000",
-    };
-
-/**
- * Спрайт pac-man
- * 7 вид
- */
-char SPRITE_PACMAN_UP2[11][12] = {
-        "00000000000",
-        "00000000000",
-        "10000000001",
-        "11000000011",
-        "11100000111",
-        "11110001111",
-        "11111011111",
-        "11111111111",
-        "01111111110",
-        "00111111100",
-        "00011111000",
-};
-
-/**
- * Спрайт pac-man
- * 8 вид
- */
-char SPRITE_PACMAN_DOWN1[11][12] = {
-        "00011111000",
-        "00111111100",
-        "01111111110",
-        "11111111111",
-        "11111011111",
-        "11111011111",
-        "11110001111",
-        "11110001111",
-        "01100000110",
-        "00100000100",
-        "00000000000",
-    };
-
-/**
- * Спрайт pac-man
- * 9 вид
- */
-char SPRITE_PACMAN_DOWN2[11][12] = {
-        "00011111000",
-        "00111111100",
-        "01111111110",
-        "11111111111",
-        "11111011111",
-        "11110001111",
-        "11100000111",
-        "11000000011",
-        "10000000001",
-        "00000000000",
-        "00000000000",
-};
-
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 1 вид
- */
-char SPRITE_RED_SPIRIT_LEFT1[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01331111331110",
-        "03333113333111",
-        "12233112233111",
-        "12233112233111",
-        "11331111331111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11110111101111",
-        "01100011000110",
-
-};
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 2 вид
- */
-char SPRITE_RED_SPIRIT_LEFT2[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01331111331110",
-        "03333113333111",
-        "12233112233111",
-        "12233112233111",
-        "11331111331111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11011100111011",
-        "10001100110001",
-};
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 3 вид
- */
-char SPRITE_RED_SPIRIT_RIGHT1[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01113311113310",
-        "11133331133330",
-        "11133221133221",
-        "11133221133221",
-        "11113311113311",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11110111101111",
-        "01100011000110",
-};
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 4 вид
- */
-char SPRITE_RED_SPIRIT_RIGHT2[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01113311113310",
-        "11133331133330",
-        "11133221133221",
-        "11133221133221",
-        "11113311113311",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11011100111011",
-        "10001100110001",
-};
-
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 5 вид
- */
-char SPRITE_RED_SPIRIT_DOWN1[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01133111133110",
-        "01333311333311",
-        "11333311333311",
-        "11322311322311",
-        "11122111122111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11110111101111",
-        "01100011000110",
-};
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 6 вид
- */
-char SPRITE_RED_SPIRIT_DOWN2[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01133111133110",
-        "01333311333311",
-        "11333311333311",
-        "11322311322311",
-        "11122111122111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-		"11011100111011",
-        "10001100110001",
-};
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 7 вид
- */
-char SPRITE_RED_SPIRIT_UP1[14][15] = {
-        "00000111100000",
-        "00022111122000",
-        "00322311322300",
-        "01333311333310",
-        "01333311333310",
-        "01133111133111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11110111101111",
-        "01100011000110",
-};
-
-/**
- * Спрайт привидения которое хочет съесть нас
- * 8 вид
- */
-char SPRITE_RED_SPIRIT_UP2[14][15] = {
-        "00000111100000",
-        "00022111122000",
-        "00322311322300",
-        "01333311333310",
-        "01333311333310",
-        "01133111133111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-        "11111111111111",
-		"11011100111011",
-        "10001100110001",
-};
-
-/**
- * Спрайт привидения которое можно съесть
- * 1 вид
- */
-char SPRITE_SHADOW_SPIRIT1[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01111111111110",
-        "01111111111110",
-        "11112211221111",
-        "11112211221111",
-        "11111111111111",
-        "11111111111111",
-        "11331133113311",
-        "13113311331131",
-        "11110111101111",
-        "01100011000110",
-    };
-
-/**
- * Спрайт привидения которое можно съесть
- * 2 вид
- */
-char SPRITE_SHADOW_SPIRIT2[14][15] = {
-        "00000111100000",
-        "00011111111000",
-        "00111111111100",
-        "01111111111110",
-        "01111111111110",
-        "01111111111110",
-        "11112211221111",
-        "11112211221111",
-        "11111111111111",
-        "11111111111111",
-        "11331133113311",
-        "13113311331131",
-        "11011100111011",
-        "10001100110001",
-};
-
-/**
- * Спрайт вишни
- */
-char SPRITE_CHERRY[12][13] = {
-        "000000000022",
-        "000000002222",
-        "000000220200",
-        "000002000200",
-        "011121002000",
-        "111211020000",
-        "131100121100",
-        "113101121110",
-        "011101111110",
-        "000001311110",
-        "000001131110",
-        "000000111100",
-    };
+#define WALL_SIZE (23)
 
 
 // активная видео страница при запуске  
@@ -735,6 +317,31 @@ int old_vpage;
 
 // активная видео страница
 int activePage = 0;
+
+/**
+ * чтение из текстового файла массива
+ * fileName - имя файла
+ * buff - ссылка на массив куда будем читать
+ * n - количество строк массива (сток в файле)
+ * m - количество столбцов массива (столбцов в файле)
+ */
+int readMapFromFile(const char *fileName, char *buff, int n, int m) {
+	FILE *fp;
+	char s[33];
+
+	fp = fopen(fileName, "r");
+	if (fp != NULL) {
+	   for (int i =0; i < n; i++) {
+		   if (fgets(s, m + 1, fp) != NULL) {
+			   s[m - 1] = '\0';
+			   strcpy(&buff[i * m], s);
+		   }
+		}
+	   fclose(fp);
+	   return 1;
+	}
+	return 0;
+}
 
 /**
  * перевернуть строку
@@ -754,19 +361,24 @@ void reverse(char s[]) {
 /**
  * преобразовать целое число в строку
  * n - число которое превращаем в строку
- * s -строка с результатом
+ * s - строка с результатом
  */
 void itoa(int n, char s[]) {
     int i, sign;
 
-    if ((sign = n) < 0)  /* record sign */
-        n = -n;          /* make n positive */
+    if ((sign = n) < 0) {
+        n = -n;     
+	}
+	
     i = 0;
-    do {       /* generate digits in reverse order */
-        s[i++] = n % 10 + '0';   /* get next digit */
-    } while ((n /= 10) > 0);     /* delete it */
-    if (sign < 0)
+    do {       
+        s[i++] = n % 10 + '0';   
+    } while ((n /= 10) > 0); 
+    
+    if (sign < 0) {
         s[i++] = '-';
+	}
+	
     s[i] = '\0';
     reverse(s);
 }
@@ -834,9 +446,10 @@ void intToBuffer3(int val,  int *i) {
  *          начиная с заданной позиции
  */
 int bufferToInt(int *i) {
-	char b[2];
+	char b[3];
 	b[0] = buffer[(*i)++];
 	b[1] = buffer[(*i)++];
+	b[2] = '\0';
 	return atoi(b);
 }
 
@@ -850,25 +463,162 @@ int bufferToInt(int *i) {
  *          начиная с заданной позиции
  */
 int bufferToInt3(int *i) {
-	char b[3];
+	char b[4];
 	b[0] = buffer[(*i)++];
 	b[1] = buffer[(*i)++];
 	b[2] = buffer[(*i)++];
+	b[3] = '\0';
 	return atoi(b);
 }
 
 /**
+ * Клетка по заданным координатам не стена (WALL)
+ * y - координата Y на карте (map[][])
+ * x - координата X на карте (map[][])
+ * return 1 - не стена, 0 - стена
+ */
+int isNotWell(int y, int x) {
+    if (map[y][x] == PACMAN || map[y][x] == PACGIRL || map[y][x] == RED || map[y][x] == CHERRY
+		  || map[y][x] == FOOD || map[y][x] == POWER_FOOD || map[y][x] == EMPTY || map[y][x] == SHADOW
+        ) {
+        return 1;
+
+    }
+    return 0;
+}
+
+/**
+ * Клетка по заданным координатам не стена и не дверь (WALL, DOOR)
+ * y - координата Y на карте (map[][])
+ * x - координата X на карте (map[][])
+ * return 1 - не стена и не дверь, 0 - стена или дверь
+ */
+int isNotWellOrDoor(int y, int x) {
+    if (isNotWell(y, x) && map[y][x] != DOOR) {
+        return 1;
+
+    }
+    return 0;
+}
+
+/**
+ * Создаем пакет с данными в buffer для передачи по сети
+ */
+void createBuffer() {
+	int i=0;
+	if (appType == SERVER_APPLICATION) {
+		intToBuffer(pacmanX, &i);
+		intToBuffer(pacmanY, &i);
+		intToBuffer(oldX, &i);
+		intToBuffer(oldY, &i);
+		intToBuffer(dx, &i);
+		intToBuffer(dy, &i);
+		intToBuffer(redX, &i);
+		intToBuffer(redY, &i);
+		intToBuffer(oldXRed, &i);
+		intToBuffer(oldYRed, &i);
+		intToBuffer(oldRedVal, &i);
+		intToBuffer(dxRed, &i);
+		intToBuffer(dyRed, &i);
+		intToBuffer(pacGirlX, &i);
+		intToBuffer(pacGirlY, &i);
+		intToBuffer(oldPacGirlX, &i);
+		intToBuffer(oldPacGirlY, &i);
+		intToBuffer(dxPacGirl, &i);
+		intToBuffer(dyPacGirl, &i);
+		intToBuffer(cherryX, &i);
+		intToBuffer(cherryY, &i);
+		intToBuffer(doorX, &i);
+		intToBuffer(doorY, &i);
+		intToBuffer(redFlag, &i);
+		intToBuffer(refreshDoor, &i);
+		intToBuffer(refreshCherry, &i);
+		intToBuffer3(score, &i);
+		intToBuffer3(redBonus, &i);
+		intToBuffer3(powerBonus, &i);
+		intToBuffer3(cherryBonus, &i);
+		intToBuffer3(foodToWIN, &i);
+		buffer[i++] = map[doorY][doorX];
+		buffer[i++] = map[cherryY][cherryX];
+		buffer[i++] = map[pacGirlY][pacGirlX];
+	} else {
+		// с клиента 2-го игрока на сервер отправляем
+		// только нажатую кнопку на клавиатуре
+		buffer[i++] = player2PressKey;
+	}
+}
+
+/**
+ * Парсим данные пришедшие по сети 
+ */
+void parseBuffer() {
+	int i=0;
+	if (appType == SERVER_APPLICATION) {
+		// пришла нажатая кнопка 2 м игроком
+		player2PressKey = buffer[i++];
+	} else {
+		// пришли данные о местоположении объектов и очках
+		pacmanX = bufferToInt(&i);
+		pacmanY = bufferToInt(&i);
+		oldX = bufferToInt(&i);
+		oldY = bufferToInt(&i);
+		dx = bufferToInt(&i);
+		dy = bufferToInt(&i);
+		redX = bufferToInt(&i);
+		redY = bufferToInt(&i);
+		oldXRed = bufferToInt(&i);
+		oldYRed = bufferToInt(&i);
+		oldRedVal = bufferToInt(&i);
+		dxRed = bufferToInt(&i);
+		dyRed = bufferToInt(&i);
+		pacGirlX = bufferToInt(&i);
+		pacGirlY = bufferToInt(&i);
+		oldPacGirlX = bufferToInt(&i);
+		oldPacGirlY = bufferToInt(&i);
+		dxPacGirl = bufferToInt(&i);
+		dyPacGirl = bufferToInt(&i);
+		cherryX = bufferToInt(&i);
+		cherryY = bufferToInt(&i);
+		doorX = bufferToInt(&i);
+		doorY = bufferToInt(&i);
+		redFlag = bufferToInt(&i);
+		refreshDoor = bufferToInt(&i);
+		refreshCherry = bufferToInt(&i);
+		score = bufferToInt3(&i);
+		redBonus = bufferToInt3(&i);
+		powerBonus = bufferToInt3(&i);
+		cherryBonus = bufferToInt3(&i);
+		foodToWIN = bufferToInt3(&i);
+		doorVal = buffer[i++];
+		cherryVal = buffer[i++];
+		map[pacGirlY][pacGirlX] = buffer[i++];
+	}
+}
+
+/**
  * Тут идут функции только для Linux
+ * Linux Linux Linux Linux Linux Linux Linux Linux Linux Linux Linux 
  */
 #ifdef __linux__
+
+// серверный socket - ждет подключения клиентов
+// использует только сервер
+int serverSocket;
+
+// клиентский socket
+// запустились как сервер или как клиент 2-го игрока
+// всегда в этот сокет пишем или читаем данные
+// отправить на сервер / клиент 2-го игрока
+// прочитать данные на сервере / клиенте 2-го игрока
+int clientSocket;
+
 /**
  * Linux
  *
  * Создание сервера
  * port - порт на катором поднимется сервер
  */
-void pacmanLinuxServer(char * port) {
-	printf("Порт: '%s'\n", port);
+void pacmanServerLinux(char * port) {
 	// порт сервера на который ждем подключение клиента
 	int serverPort;
 	// структура содержащая адрес сервера
@@ -880,7 +630,7 @@ void pacmanLinuxServer(char * port) {
     // создаем ерверный сокет
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket < 0) {
-    	printf("\nERROR socket - не удалось открыть сокет (serverSocket)\n");
+    	printf("\nERROR open socket");
     } else {
 		bzero((char *) &serverAddress, sizeof(serverAddress));
 
@@ -890,18 +640,18 @@ void pacmanLinuxServer(char * port) {
 
 		// пробуем занять порт
 		if (bind(serverSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0) {
-			printf("\nERROR bind - не удалось занять порт\n");
+			printf("\nERROR bind\n");
 		} else {
 			// устанавливаем  serverSocket в состояние прослушивания, будет использоваться для
 			// приёма запросов входящих соединений с помощью accept()
 			// очередь ожидающих соединений  = 5
 			if (listen(serverSocket, 5) < 0) {
-				printf("\nERROR listen - не удвлось устанавить serverSocket в состояние прослушивания\n");
+				printf("\nERROR listen\n");
 			} else {
 				socklen_t clilen = sizeof(clientAddress);
 				clientSocket = accept(serverSocket, (struct sockaddr *) &clientAddress, &clilen);
 				if (clientSocket < 0) {
-					printf("\nERROR accept - не удалось создать соединения с клиентом\n");
+					printf("\nERROR accept\n");
 				} else {
 					// переводим сокет в не блокирующий режим
 					fcntl(clientSocket, F_SETFL, O_NONBLOCK);
@@ -923,7 +673,7 @@ void pacmanLinuxServer(char * port) {
  * port - порт на катором работает сервер
  */
 void pacmanClientLinux(char * host, char * port) {
-	printf("Порт: '%s' Хост: '%s'\n", port, host);
+	//printf("Порт: '%s' Хост: '%s'\n", port, host);
 	// порт сервера на который ждем подключение клиента
 	int serverPort;
 	// структура содержащая адрес сервера
@@ -938,19 +688,19 @@ void pacmanClientLinux(char * host, char * port) {
 	// Создаем сокет для отправки сообщений
 	clientSocket = socket(AF_INET, SOCK_STREAM, 0);
 	if (clientSocket < 0) {
-		printf("\nERROR socket - ошибка открытия сокета\n");
+		printf("\nERROR open socket\n");
 	} else {
 		// получаем хост по имени или ip
 		server = gethostbyname(host);
 		if (server == NULL) {
-			printf("\nERROR gethostbyname - хост не найден\n");
+			printf("\nERROR gethostbyname\n");
 		} else {
 			bzero((char *) &serverAddress, sizeof(serverAddress));
 			serverAddress.sin_family = AF_INET;
 			bcopy((char *)server->h_addr, (char *)&serverAddress.sin_addr.s_addr, server->h_length);
 			serverAddress.sin_port = htons(serverPort);
 			if (connect(clientSocket,(struct sockaddr *) &serverAddress,sizeof(serverAddress)) < 0) {
-				printf("\nERROR connect - ошибка при создании соединения\n");
+				printf("\nERROR connect\n");
 			} else {
 				// переводим сокет в не блокирующий режим
 				fcntl(clientSocket, F_SETFL, O_NONBLOCK);
@@ -965,11 +715,50 @@ void pacmanClientLinux(char * host, char * port) {
 
 /**
  * Linux
- * Читает клиентом 2 игрока данные из сокета переданные сервером
- * 1 игрока в глобальную переменную buffer (не пересаоздаем его всевремя)
- * а из нее потом все перекладывается в остальные  переменные
+ *
+ * отправляет через интерфейс сокетов сформерованный пакет
+ * данные записываются в глобальный массив buffer
+ * затем записываются в сокет
+ *
+ * - Cоздает пакет с данными о положении персонажей
+ *   для отправки с сервера клиенту 2-го игрока
+ *
+ * - Отправляет на сервер данные с клиента 2-го игрока
+ *   шлем на сервер только нажатую на клавиатуре кнопку 2м игроком
  */
-void readClientFromSocketLinux() {
+void writeInSocketLinux() {
+	// очищаем буфер
+	bzero(buffer, RECV_BUFFER_SIZE);
+
+	// создаем пакет с данными в buffer для передачи по сети
+	createBuffer();
+	
+	int n;
+	if (appType == SERVER_APPLICATION) {
+		// записываем buffer в сокет (отправляем 2-му игроку)
+		n = write(clientSocket, buffer, RECV_BUFFER_SIZE);
+	} else {
+		// записываем buffer в сокет (отправляем на Сервер)
+		n = write(clientSocket, buffer, 1);
+	}
+
+	if (n < 0) {
+		if (appType == SERVER_APPLICATION) {
+			printf("\nPac-Girl OFF\n");
+		} else {
+			printf("\nPac-Man OFF\n");
+		}
+		connectionLost = 1;
+	}
+}
+
+/**
+ * Linux
+ * Читает данные из сокета переданные по сети
+ * в глобальную переменную buffer (не пересаоздаем его всевремя)
+ * а из нее потом все перекладывается в остальные  переменные (смотри parseBuffer();)
+ */
+void readFromSocketLinux() {
 	fd_set readset;
 	FD_ZERO(&readset);
 	FD_SET(clientSocket, &readset);
@@ -983,171 +772,27 @@ void readClientFromSocketLinux() {
     int n = select(clientSocket+1, &readset, NULL, NULL, &timeout);
     if (n > 0 && FD_ISSET(clientSocket, &readset)) {
     	// очищаем буфер
-    	bzero(buffer, 256);
+    	bzero(buffer, RECV_BUFFER_SIZE);
 
-    	// читоаем из сокета
-		n = read(clientSocket, buffer, 255);
-		if (n < 1) {
-			printf("\nread - error!\n Сервер разорвал соединение!\nGame Over!\n");
-			connectionLost = 1;
+		// читоаем из сокета
+		if (appType == SERVER_APPLICATION) {
+			n = read(clientSocket, buffer, 1);
 		} else {
-			int i=0;
-
-			pacmanX = bufferToInt(&i);
-			pacmanY = bufferToInt(&i);
-			oldX = bufferToInt(&i);
-			oldY = bufferToInt(&i);
-			dx = bufferToInt(&i);
-			dy = bufferToInt(&i);
-			redX = bufferToInt(&i);
-			redY = bufferToInt(&i);
-			oldXRed = bufferToInt(&i);
-			oldYRed = bufferToInt(&i);
-			oldRedVal = bufferToInt(&i);
-			dxRed = bufferToInt(&i);
-			dyRed = bufferToInt(&i);
-			pacGirlX = bufferToInt(&i);
-			pacGirlY = bufferToInt(&i);
-			oldPacGirlX = bufferToInt(&i);
-			oldPacGirlY = bufferToInt(&i);
-			dxPacGirl = bufferToInt(&i);
-			dyPacGirl = bufferToInt(&i);
-			cherryX = bufferToInt(&i);
-			cherryY = bufferToInt(&i);
-			doorX = bufferToInt(&i);
-			doorY = bufferToInt(&i);
-			redFlag = bufferToInt(&i);
-			refreshDoor = bufferToInt(&i);
-			refreshCherry = bufferToInt(&i);
-			score = bufferToInt3(&i);
-			redBonus = bufferToInt3(&i);
-			powerBonus = bufferToInt3(&i);
-			cherryBonus = bufferToInt3(&i);
-			foodToWIN = bufferToInt3(&i);
-			doorVal = buffer[i++];
-			cherryVal = buffer[i++];
-			map[pacGirlY][pacGirlX] = buffer[i++];
+			n = read(clientSocket, buffer, RECV_BUFFER_SIZE);
+		}
+		
+		if (n < 1) {
+			if (appType == SERVER_APPLICATION) {
+				printf("\nPac-Girl OFF\n");
+			} else {
+				printf("\nPac-Man OFF\n");
+			}
+			connectionLost = 1;
+		} else if (n > 0 && buffer[0] != 0) {
+			parseBuffer();
 		}
     }
 }
-
-/**
- * Linux
- * Cоздает пакет с данными о положении персонажей
- * для отправки с сервера клиенту 2-го игрока
- *
- * отправляет через интерфейс сокетов сформерованный пакет
- * данные записываются в глобальный массив buffer
- * затем записываются в сокет
- */
-void writeServerInSocketLinux() {
-	// очищаем буфер
-	bzero(buffer, 256);
-
-	int i=0;
-	intToBuffer(pacmanX, &i);
-	intToBuffer(pacmanY, &i);
-	intToBuffer(oldX, &i);
-	intToBuffer(oldY, &i);
-	intToBuffer(dx, &i);
-	intToBuffer(dy, &i);
-	intToBuffer(redX, &i);
-	intToBuffer(redY, &i);
-	intToBuffer(oldXRed, &i);
-	intToBuffer(oldYRed, &i);
-	intToBuffer(oldRedVal, &i);
-	intToBuffer(dxRed, &i);
-	intToBuffer(dyRed, &i);
-	intToBuffer(pacGirlX, &i);
-	intToBuffer(pacGirlY, &i);
-	intToBuffer(oldPacGirlX, &i);
-	intToBuffer(oldPacGirlY, &i);
-	intToBuffer(dxPacGirl, &i);
-	intToBuffer(dyPacGirl, &i);
-	intToBuffer(cherryX, &i);
-	intToBuffer(cherryY, &i);
-	intToBuffer(doorX, &i);
-	intToBuffer(doorY, &i);
-	intToBuffer(redFlag, &i);
-	intToBuffer(refreshDoor, &i);
-	intToBuffer(refreshCherry, &i);
-	intToBuffer3(score, &i);
-	intToBuffer3(redBonus, &i);
-	intToBuffer3(powerBonus, &i);
-	intToBuffer3(cherryBonus, &i);
-	intToBuffer3(foodToWIN, &i);
-	buffer[i++] = map[doorY][doorX];
-	buffer[i++] = map[cherryY][cherryX];
-	buffer[i++] = map[pacGirlY][pacGirlX];
-
-	// записываем buffer в сокет (отправляем 2-му игроку)
-	int n = write(clientSocket, buffer, 255);
-
-	if (n < 0) {
-		printf("\nERROR write - ошибка записи в сокет!\n");
-		connectionLost = 1;
-	}
-
-}
-
-/**
- * Linux
- * Отправляет на сервер данные с клиента 2-го игрока
- * шлем на сервер только нажатую на клавиатуре кнопку
- * 2м игроком
- */
-void writeClientInSocketLinux() {
-	// очищаем буфер
-	bzero(buffer, 256);
-	int i=0;
-	// с клиента 2-го игрока на сервер отправляем
-	// только нажатую кнопку на клавиатуре
-	buffer[i++] = player2PressKey;
-
-	// записываем buffer в сокет (отправляем на Сервер)
-	int n = write(clientSocket, buffer, 1);
-
-	if (n < 0) {
-		printf("\nERROR write - ошибка записи в сокет!\n");
-		connectionLost = 1;
-	}
-
-}
-
-/**
- * Linux
- * Читаем на сервере данные посланные с клиента 2го игрока
- * какую кнопку на клавиатуре он нажал
- */
-void readServerFromSocketLinux() {
-	fd_set readset;
-	FD_ZERO(&readset);
-	FD_SET(clientSocket, &readset);
-
-    // Задаём таймаут
-    timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 150;
-
-    // проверяем надо ли читать данные из сокета
-    int n = select(clientSocket+1, &readset, NULL, NULL, &timeout);
-    if (n > 0 && FD_ISSET(clientSocket, &readset)) {
-    	// очищаем буфер
-    	bzero(buffer, 256);
-    	// читоаем из сокета данные
-		n = read(clientSocket, buffer, 1);
-		if (n < 1) {
-			printf("\nread - error!\n 2 игрок разорвал соединение!\n");
-			getchar();
-			connectionLost = 1;
-		} else {
-			int i=0;
-			// запоминаем какую кнопку нажал 2 ой игрок
-			player2PressKey = buffer[i++];
-		}
-    }
-}
-
 
 /**
  * Linux
@@ -1163,8 +808,6 @@ void closeSocketsLinux() {
 		 close(clientSocket);
 	}
 }
-
-
 
 /**
  *
@@ -1221,52 +864,411 @@ int getch()
 }
 
 /**
+ * Linux
+ *
  * Текущее время в милисекундах
  * printf("milliseconds: %lld\n", milliseconds); - распечатать
  *
  * return - милисекунды
  */
-
-/**  Linux */
 long long current_timestamp() {
     struct timeval te;
     // получить текущее время
     gettimeofday(&te, nullptr);
     // вычисляем милисекунды
-    long long milliseconds = te.tv_sec*1000LL + te.tv_usec/1000; // calculate milliseconds
+    long long milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;
     return milliseconds;
 }
 
 /**
- * Тут идут функции только для DOS
+ *  Linux 
+ *
+ *  Перерисовать карту в терменале!
+ */
+void draw_Linux() {
+    system("clear");
+    printf("   Super Turbo Net Pac-Man\n");
+    for(int i = 0; i < MAP_SIZE_Y; i++) {
+        printf("%s\n",map[i]);
+    }
+    printf("Score %d! To win %d / %d!", score + redBonus + powerBonus + cherryBonus, score, foodToWIN);
+}
+
+/**
+ * END Linux END Linux END Linux END Linux END Linux END Linux END Linux 
  */
 #else
-/** DOS **/
-/* Установить разрешение 320 x 200 с 16 цетами 
+/**
+ * DOS DOS DOS DOS DOS DOS DOS DOS DOS DOS DOS
+ * Тут идут функции и переменные только для DOS
+ */
+
+// Нажата ли ctrl Break
+volatile uint8_t ctrlBreakDetected = 0;
+
+// серверный socket - ждет подключения клиентов
+// использует только сервер
+TcpSocket *serverSocket;
+
+// клиентский socket
+// запустились как сервер или как клиент 2-го игрока
+// всегда в этот сокет пишем или читаем данные
+// отправить на сервер / клиент 2-го игрока
+// прочитать данные на сервере / клиенте 2-го игрока
+TcpSocket *clientSocket;
+
+/**
+ * DOS
+ *
+ * callback нажатия Сtrl+Break
+ */
+void __interrupt __far ctrlBreakHandler() {
+	ctrlBreakDetected = 1;
+}
+
+/**
+ * DOS
+ *
+ * callback нажатия Ctrl+C
+ */
+void __interrupt __far ctrlCHandler() {
+	// Ничего не делаем
+}
+
+/**
+ * DOS
+ *
+ * выгрузить TCP/IP стек
+ */
+static void shutdown() {
+    // Если этого не сделать, операционная система перестанет работать из-за зависшего прерывания таймера.
+    Utils::endStack();
+}
+
+/**
+ * DOS
+ *
+ * Создание сервера
+ * port - порт на катором поднимется сервер
+ */
+void pacmanServerDOS(char * port) {
+	// порт сервера на который ждем подключение клиента
+	uint16_t serverPort = atoi(port);
+    // Все программы mTCP должны прочитать файл конфигурации mTCP, чтобы узнать, какое прерывание использует пакетный драйвер,
+    // каков IP-адрес и сетевая маска, а также некоторые другие необязательные параметры.
+	//printf("\nparseEnv");
+	if (Utils::parseEnv() != 0) {
+		printf("\nERROR parseEnv\n");
+	} else {
+		//printf("-OK\n");
+	    // Инициализировать TCP/IP стек.
+	    // Первый параметр - количество создаваемых TCP сокетов.
+	    // Второй параметр - количество исходящих TCP-буферов, которые необходимо создать.
+	    // Параметры три и четыре - пользовательские обработчики Ctrl-Break и Ctrl-C.
+	    // Если функция возвращает не нуль, это говорит о том, что была ошибка, и программа должна завершиться.
+	    // Наиболее распространённой ошибкой является невозможность найти пакетный драйвер, поскольку он не был загружен или был загружен с неправильным номером прерывания.
+		//printf("\ninitStack");
+	    if (Utils::initStack(2, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlCHandler)) {
+	    	printf("\nERROR failed to initialize TCP/IP\n");
+	    } else {
+	    	//printf("-OK\n");
+	    	// создали серверный сокет
+	    	//printf("\ngetSocket");
+	    	serverSocket = TcpSocketMgr::getSocket();
+	    	//printf("-OK\n");
+	    	// пробуем занять порт
+	    	//printf("\nlisten");
+	    	serverSocket->listen(serverPort, RECV_BUFFER_SIZE);
+	    	//printf("-OK\n");
+
+	        // Ждем подключения клиента is non-blocking!
+	        while (1) {
+
+	          if (ctrlBreakDetected) {
+	        	// Пользователь нажал Ctrl+C.
+	            break;
+	          }
+
+	          //printf("\nPACKET_PROCESS_SINGLE");
+	          PACKET_PROCESS_SINGLE;
+	          //printf("-OK\n");
+
+	          //printf("\ndriveArp");
+	          Arp::driveArp();
+	          //printf("-OK\n");
+
+	          //printf("\ndrivePackets");
+	          Tcp::drivePackets();
+	          //printf("-OK\n");
+
+	          //printf("\naccept");
+	          clientSocket = TcpSocketMgr::accept();
+	          if (clientSocket != NULL) {
+		          //printf("-OK\n");
+	        	  serverSocket->close();
+	        	  TcpSocketMgr::freeSocket(serverSocket);
+				  // сервер поднят успешно и соеденился с клиентом 2-го игрока
+				  connectionLost = 0;
+				  // мы являемся сервером
+				  appType = SERVER_APPLICATION;
+	        	  break;
+	          }
+
+	          if (_bios_keybrd(1) != 0) {
+				char c = _bios_keybrd(0);
+
+				if ((c == 27) || (c == 3)) {
+					break;
+				}
+	          }
+	        }
+
+	        if (appType != SERVER_APPLICATION) {
+	        	shutdown();
+	        }
+	    }
+	}
+}
+
+
+/**
+ * DOS
+ *
+ * Подключение к серверу клиента 2 игрока
+ * host - хост на котором работает сервер
+ * port - порт на катором работает сервер
+ */
+void pacmanClientDOS(char * host, char * port) {
+	// printf("Порт: '%s' Хост: '%s'\n", port, host);
+	// порт сервера на который ждем подключение клиента
+	uint16_t serverPort = atoi(port);
+    // Все программы mTCP должны прочитать файл конфигурации mTCP, чтобы узнать, какое прерывание использует пакетный драйвер,
+    // каков IP-адрес и сетевая маска, а также некоторые другие необязательные параметры.
+	//printf("\nparseEnv");
+	if (Utils::parseEnv() != 0) {
+		printf("\nERROR parseEnv\n");
+	} else {
+		//printf("-OK\n");
+	    // Инициализировать TCP/IP стек.
+	    // Первый параметр - количество создаваемых TCP сокетов.
+	    // Второй параметр - количество исходящих TCP-буферов, которые необходимо создать.
+	    // Параметры три и четыре - пользовательские обработчики Ctrl-Break и Ctrl-C.
+	    // Если функция возвращает не нуль, это говорит о том, что была ошибка, и программа должна завершиться.
+	    // Наиболее распространённой ошибкой является невозможность найти пакетный драйвер, поскольку он не был загружен или был загружен с неправильным номером прерывания.
+		//printf("\ninitStack");
+	    if (Utils::initStack(2, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlCHandler)) {
+	    	printf("\nERROR initialize TCP/IP\n");
+	    } else {
+	    	//printf("-OK\n");
+			// структура содержащая адрес сервера
+			IpAddr_t serverAddress;
+			//nt16_t lclPort = 2048;
+
+			// Если был задан числовой IP-адрес, первый вызов Dns::resolve разрешит его, и не придётся ждать.
+			// Иначе, нужно в цикле дождаться завершения работы DNS.
+			//printf("\nresolve");
+			int8_t rc2 = Dns::resolve(host, serverAddress, 1);
+			if (rc2 < 0) {
+				printf("\nError resolving Server\n" );
+				shutdown();
+			} else {
+				//printf("-OK\n");
+		        while (1) {
+		            if (ctrlBreakDetected) break;
+		            if (!Dns::isQueryPending()) break;
+
+		            // Цикл должен обрабатывать входящие пакеты, при необходимости повторять запросы ARP и повторять запросы DNS.
+		            //printf("\nPACKET_PROCESS_SINGLE");
+		            PACKET_PROCESS_SINGLE;
+		            //printf("-OK\n");
+
+		            //printf("\ndriveArp");
+		            Arp::driveArp();
+		            //printf("-OK\n");
+
+		            //printf("\ndrivePackets");
+		            Tcp::drivePackets();
+		            //printf("-OK\n");
+
+		            // Реализация DNS основана на UDP.
+		            // Dns::drivePendingQuery нужен потому, что пакеты UDP могут быть потеряны, и нужен способ определить, нужно ли нам повторно отправить наш DNS-запрос.
+		            //printf("\ndrivePendingQuery");
+		            Dns::drivePendingQuery();
+		            //printf("-OK\n");
+		        }
+		        // Ещё один вызов Dns::resolve вернёт окончательный результат.
+		        //printf("\nresolve2");
+		        rc2 = Dns::resolve(host, serverAddress, 0);
+		        if (rc2 < 0) {
+					printf("\nError resolving Server\n" );
+					shutdown();
+				} else {
+					//printf("-OK\n");
+			        // Выделить сокет.
+			        // mTCP владеет структурами данных сокета. Пользователь получает указатель на них.
+			        // Вызов TcpSocketMgr::getSocket() предоставляет сокет для использования.
+			        // Когда работа будет закончена, его нужно вернуть с помощью вызова TcpSocketMgr::freeSocket().
+					//printf("\ngetSocket");
+					clientSocket = TcpSocketMgr::getSocket();
+					//printf("-OK\n");
+
+			        // Установить размер приёмного буфера.
+					//printf("\nsetRecvBuffer");
+					clientSocket->setRecvBuffer(RECV_BUFFER_SIZE);
+					//printf("-OK\n");
+
+					// Выполнить неблокирующее соединение, ожидать 10 секунд перед тем, как выдать ошибку.
+					printf("\nconnect");
+					int8_t rc = clientSocket->connect(2048, serverAddress, serverPort, 10000);
+					if (rc != 0) {
+					    printf("ERROR Socket open failed\n" );
+					    shutdown();
+					} else {
+						printf("-OK\n");
+						// клиент 2-го игрока успешно соединился с сервером
+						connectionLost = 0;
+						// мы являемся клиентом
+						appType = CLIENT_APPLICATION;
+					}
+				}
+			}
+	    }
+	}
+}
+
+/**
+ * DOS
+ *
+ * Читает клиентом 2 игрока данные из сокета переданные сервером
+ * 1 игрока в глобальную переменную buffer (не пересаоздаем его всевремя)
+ * а из нее потом все перекладывается в остальные  переменные
+ */
+void readFromSocketDOS() {
+    // Обработка входящих пакетов.
+    // PACKET_PROCESS_SINGLE - это макрос, проверяющий наличие новых пакетов от драйвера пакетов.
+    // Если таковые обнаружены, макрос обрабатывает эти пакеты.
+    PACKET_PROCESS_SINGLE;
+    // Arp::driveArp() используется для проверки ожидающих запросов ARP и повторения их при необходимости.
+    Arp::driveArp();
+    // Tcp::drivePackets() используется для отправки пакетов, которые были поставлены в очередь для отправки.
+    Tcp::drivePackets();
+
+    if (clientSocket->isRemoteClosed()) {
+        // Сокет был закрыт удалённой стороной.
+    	connectionLost = 1;
+    } else {
+		// очищаем буфер
+		bzero(buffer, RECV_BUFFER_SIZE);
+
+		// проверяем можно ли что то прочитать из сокета
+        // Если сокет не закрыт, то код попытается получить на него данные.
+        // Код возврата 0 указывает на отсутствие данных.
+        // Отрицательный код возврата указывает на ошибку сокета, а положительный код возврата - количество полученных байтов.
+        int16_t n = 0;
+		if (appType == SERVER_APPLICATION) {
+			n = clientSocket->recv(buffer, 1);
+		} else {
+			n = clientSocket->recv(buffer, RECV_BUFFER_SIZE);
+		}
+		
+       	if (n < 0) {
+			connectionLost = 1;
+		} else if (n > 0 && buffer[0] != 0) {
+			// парсим данные пришедшие по сети
+			parseBuffer();
+		}
+    }
+}
+
+
+/**
+ * DOS
+ *
+ * Отправляет на сервер данные с клиента 2-го игрока
+ * шлем на сервер только нажатую на клавиатуре кнопку
+ * 2м игроком
+ */
+void writeInSocketDOS() {
+    // Обработка входящих пакетов.
+    // PACKET_PROCESS_SINGLE - это макрос, проверяющий наличие новых пакетов от драйвера пакетов.
+    // Если таковые обнаружены, макрос обрабатывает эти пакеты.
+    PACKET_PROCESS_SINGLE;
+    // Arp::driveArp() используется для проверки ожидающих запросов ARP и повторения их при необходимости.
+    Arp::driveArp();
+    // Tcp::drivePackets() используется для отправки пакетов, которые были поставлены в очередь для отправки.
+    Tcp::drivePackets();
+
+    if (clientSocket->isRemoteClosed()) {
+        // Сокет был закрыт удалённой стороной.
+    	connectionLost = 1;
+    } else {
+		// очищаем буфер
+		bzero(buffer, RECV_BUFFER_SIZE);
+		
+		// создаем пакт данных в buffer для отправки по сети
+		createBuffer();
+		
+		int8_t n;
+		if (appType == SERVER_APPLICATION) {
+			// записываем buffer в сокет (отправляем 2-му игроку)
+			n = clientSocket->send(buffer, RECV_BUFFER_SIZE);
+		} else {
+			// записываем buffer в сокет (отправляем на Сервер)
+			n = clientSocket->send(buffer, 1);
+		}
+		
+		if (n < 0) {
+			connectionLost = 1;
+		}
+    }
+}
+
+/**
+ * DOS
+ *
+ * Закрыть сокеты
+ */
+void closeSocketsDOS() {
+	if (appType == CLIENT_APPLICATION || appType == SERVER_APPLICATION) {
+	     if (clientSocket != NULL) {
+	    	 clientSocket->close();
+	    	 TcpSocketMgr::freeSocket(clientSocket);
+	     }
+	     shutdown();
+	}
+}
+
+/**
+ * DOS
+ *
+ * Установить разрешение 320 x 200 с 16 цетами 
  */
 void setVideoMode_DOS() {
     // 320 x 200 16 colors
     _setvideomode(_MRES16COLOR); 
 }
 
-/** DOS **/
-/*
+/** 
+ * DOS
+ *
  * Получить активную видео страницу  
  */
 int getGetActivePage_DOS() {
     return _getactivepage();
 }
 
-/** DOS **/
-/*
+/** 
+ * DOS
+ *
  * Получить отображаемую видео страницу  
  */
 int getVisualPage_DOS() {
     return _getvisualpage();
 }
 
-/** DOS **/
-/*
+/** 
+ * DOS
+ *
  * Установить назад видеорежим что был при старте
  */
 void setBackStartVideoMode_DOS(int old_apage, int old_vpage) {
@@ -1274,738 +1276,322 @@ void setBackStartVideoMode_DOS(int old_apage, int old_vpage) {
     _setvisualpage(old_vpage);
     _setvideomode(_DEFAULTMODE);
 
-    printf("   Super Turbo Net Pac-Man\n");
-    printf("\nScore %d", score + redBonus + powerBonus + cherryBonus);
-    printf("\n          GAME OVER!\n");
+    printf("\n   Super Turbo Net Pac-Man v1.3 for DOS (IBM PC XT Intel 8088)\n");
 }
 
- void drawEmpty(int x, int y, int c) {
-    int dx=8*x-3, dy=8*y-2; // смещение
-    _setcolor(c);
-    for (int i=0; i<14; i++) {
-        for (int j=0; j<14; j++) {
-            _setpixel(j+dx,i+dy); // рисуем точку
-        }
-    }
- }
-
- void drawUpWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<6;j++) {
-            _setpixel(i+dx,j+dy);
-        }
-    }
- }
-
-void drawLeftWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<4;i++) {
-        for (int j=0;j<8;j++) {
-            _setpixel(i+dx,j+dy);
-        }
-    }
- }
-
-
-void drawRightWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=4;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            _setpixel(i+dx,j+dy);
-        }
-    }
- }
-
-void drawDownWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=5;j<6;j++) {
-            _setpixel(i+dx,j+dy);
-        }
-    }
- }
-
-void drawDownFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=5;j<8;j++) {
-            _setpixel(i+dx,j+dy);
-        }
-    }
- }
-
-
-void drawUpLeftCornerWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            if (i<4 || j<6) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
-void drawUpLeftCornerFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        if (i<4) {
-            for (int j=5;j<8;j++) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-
-        _setpixel(i+dx,5+dy);
-    }
- }
-
- void drawDownLeftCornerWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            if (i<4 || j>4) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
- void drawDownLeftCornerFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        if (i<4) {
-           for (int j=0;j<8;j++) {
-                _setpixel(i+dx,j+dy);
-           }
-        }
-        _setpixel(i+dx,5+dy);
-    }
- }
-
- void drawDownLeftCornerSmallWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        if (i<4) {
-           for (int j=0;j<6;j++) {
-                _setpixel(i+dx,j+dy);
-           }
-        }
-        _setpixel(i+dx,5+dy);
-    }
- }
-
-
- void drawDownRightCornerWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            if (i>3 || j>4) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
-
- void drawDownRightCornerFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        if (i>3) {
-            for (int j=0;j<8;j++) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-       _setpixel(i+dx,5+dy);
-
-    }
- }
-
- void drawDownRightCornerSmallWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        if (i>3) {
-            for (int j=0;j<6;j++) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-       _setpixel(i+dx,5+dy);
-
-    }
- }
-
-void drawUpRightCornerWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            if (i>3 || j<6) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
-void drawUpRightCornerFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        if (i>3) {
-            for (int j=5;j<8;j++) {
-                _setpixel(i+dx,j+dy);
-            }
-        } else {
-            _setpixel(i+dx,5+dy);
-        }
-
-    }
- }
-
-void drawFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            _setpixel(i+dx,j+dy);
-        }
-    }
- }
-
-void drawLeftDownPointWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=5;j<6;j++) {
-            if (i<4 && j>4) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
-void drawLeftDownPointFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=5;j<8;j++) {
-            if (i<4 && j>4) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
- void drawRightDownPointWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=5;j<6;j++) {
-            if (i>3 && j>4) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
- void drawRightDownPointFullWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=5;j<8;j++) {
-            if (i>3 && j>4) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
- void drawRightUpPointWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            if (i>3 && j<6) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
- void drawLeftUpPointWall(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=0;i<8;i++) {
-        for (int j=0;j<8;j++) {
-            if (i<4 && j<6) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
-
- void drawFood(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    _setpixel(3+dx,4+dy);
-    _setpixel(3+dx,5+dy);
-    _setpixel(4+dx,5+dy);
-    _setpixel(4+dx,4+dy);
-
- }
-
- void drawPowerFood(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=2;i<6;i++) {
-        for (int j=2;j<6;j++) {
-            if (i>=2 && i<6 || j>2 && j<6) {
-                _setpixel(i+dx,j+dy);
-            }
-        }
-    }
- }
-
- void drawDoor(int x, int y, int c) {
-    int dx=8*x, dy=8*y;
-
-    _setcolor(c);
-    for(int i=-2;i<11;i++) {
-       _setpixel(i+dx,6+dy);
-    }
-
- }
-
-
 /**
- * Нарисовать в DOS PAC-MAN
- * x - координата х где нарисовать
- * y - координата y где нарисовать
- * c0 - цвет фона
- * c1 - цвет PAC-MAN
- * p - спрайт привидения 11x11 пикселей - 2 цвета
- *     '0' - цвет фона
- *     '1' - цвет PAC-MAN
+ * DOS
+ *
+ * Нарисовать на экране спрайт из буфера
+ * x - позиция по горизонтали
+ * y - позиция по вертекали
+ * n - размер массива по y (количество строк в файле)
+ * m - размер массива по x (количество столбцов в файле)
+ * buff - массив с данными из текстового файла
  */
-void drawPacMen(int x, int y, int c0, int c1, char p[11][12]) {
-    int dx=8*x-1, dy=8*y;
+void drawSprite(int x, int y, int n, int m, char *buff) {
+   int dx = x*8;
+   int dy = y*8;
+   char txt[2];
+   for(int i = 0; i < n; i++) {
+	   for (int j=0; j < m; j++) {
+		   txt[0] = buff[i * n + j + i]; 
+		   txt[1] = '\0';
+		   int val = atoi(txt);
+		   if (val > 7) {
+			   // желтый в файле 8 а на самам деле 14
+			   // белый в файле 9 а на самом деле 15
+			   val+=6;
+		   } 
+		   _setcolor(val);
+		   _setpixel(dx+j, dy+i);
+	   }
 
-    for (int i=0; i<11; i++) {
-        for (int j=0; j<11; j++) {
-            if (p[i][j] == '1') {
-                _setcolor(c1); // цвет PAC-MAN
-            } else {
-                _setcolor(c0); // цвет фона все остальное
-            }
-            _setpixel(j+dx,i+dy); // рисуем точку
-        }
-    }
- }
-
-/**
- * Нарисовать в DOS привидение
- * которое хочет съесть нас
- * x - координата х где нарисовать
- * y - координата y где нарисовать
- * c0 - цвет фона
- * c1 - цвет привидения
- * c2 - цвет зрачков
- * c3 - цвет белков глаза
- * p - спрайт привидения 14x14 пикселей - 4 цвета
- *     '0' - цвет фона
- *     '1' - цвет привидения
- *     '2' - цвет зрачков
- *     '3' - цвет белков глаза
- */
- void drawRed(int x, int y, int c0, int c1, int c2, int c3, char p[14][15]) {
-    int dx=8*x-3, dy=8*y-2; // смещение
-    for (int i=0; i<14; i++) {
-        for (int j=0; j<14; j++) {
-            if (p[i][j] == '1') {
-                _setcolor(c1); // цвет призрака
-            } else if (p[i][j] == '2') {
-                _setcolor(c2); // цвет зрачков
-            } else if (p[i][j] == '3') {
-                _setcolor(c3); // цвет белков глаз
-            } else {
-                _setcolor(c0); // цвет фона все остальное
-            }
-            _setpixel(j+dx,i+dy); // рисуем точку
-        }
-    }
- }
-
-
-/**
- * Нарисовать в DOS привидение
- * которое можно съесть
- * x - координата х где нарисовать
- * y - координата y где нарисовать
- * c0 - цвет фона
- * c1 - цвет привидения
- * c2 - цвет рта
- * c3 - цвет глаз
- * p - спрайт привидения 14x14 пикселей - 4 цвета
- *     '0' - цвет фона
- *     '1' - цвет привидения
- *     '2' - цвет рта
- *     '3' - цвет глаз
- */
- void drawShadow(int x, int y, int c0, int c1, int c2, int c3, char p[14][15]) {
-    int dx=8*x-3, dy=8*y-2; // смещение
-    for (int i=0; i<14; i++) {
-        for (int j=0; j<14; j++) {
-            if (p[i][j] == '1') {
-                _setcolor(c1); // цвет призрака
-            } else if (p[i][j] == '2') {
-                _setcolor(c2); // цвет рта
-            } else if (p[i][j] == '3') {
-                _setcolor(c3); // цвет глаз
-            } else {
-                _setcolor(c0); // цвет фона все остальное
-            }
-            _setpixel(j+dx,i+dy); // рисуем точку
-        }
-    }
- }
-
-/**
- * Нарисовать в DOS черешню
- * x - координата х где нарисовать
- * y - координата y где нарисовать
- * c0 - цвет фона
- * c1 - цвет черешни
- * c2 - цвет веточки
- * c3 - цвет отблиска
- * p - спрайт привидения 14x14 пикселей - 4 цвета
- *     '0' - цвет фона
- *     '1' - цвет черешни
- *     '2' - цвет веточки
- *     '3' - цвет отблиска
- */
- void drawCherry(int x, int y, int c0, int c1, int c2, int c3, char p[12][13]) {
-    int dx=8*x-2, dy=8*y-3;
-
-    for (int i=0; i<12; i++) {
-        for (int j=0; j<12; j++) {
-            if (p[i][j] == '1') {
-                _setcolor(c1); // цвет черешни
-            } else if (p[i][j] == '2') {
-                _setcolor(c2); // цвет веточки
-            } else if (p[i][j] == '3') {
-                _setcolor(c3); // цвет отблисков
-            } else {
-                _setcolor(c0); // цвет фона все остальное
-            }
-            _setpixel(j+dx,i+dy); // рисуем точку
-        }
-    }
-
- }
-
-/** DOS */
-/* 
- *  Перерисовать карту в графическом режим
- */
-void draw_DOS() {
-    if (activePage == 0) {
-        activePage = 1;
-    } else {
-        activePage = 0;
-    }
-    _setactivepage(activePage);
-
-    for (int i = 0; i < mapSizeX; i++) {
-        for (int j =0; j < mapSizeY ; j++) {
-            char val = map[i][j] ;
-            if (val == WALL_8) {
-                drawUpWall(j, i, COLOR_BLUE);
-            } else if(val == WALL_4) {
-                drawLeftWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_7) {
-                drawUpLeftCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_6) {
-                drawRightWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_1) {
-                drawDownLeftCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_9) {
-                drawUpRightCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_5) {
-                drawFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_3) {
-                drawDownRightCornerWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_2) {
-                drawDownWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_0) {
-                drawLeftDownPointWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_I) {
-                drawRightDownPointWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_L) {
-                drawRightUpPointWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_D) {
-                drawLeftUpPointWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_X) {
-                drawDownFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_J) {
-                drawLeftDownPointFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_F) {
-                drawRightDownPointFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_S) {
-                drawDownLeftCornerFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_E) {
-                drawDownRightCornerFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_M) {
-                drawUpRightCornerFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_N) {
-                drawUpLeftCornerFullWall(j, i, COLOR_BLUE);
-            } else if (val == WALL_Y) {
-                drawDownRightCornerSmallWall(j, i, COLOR_BLUE);
-            } else if (val ==  WALL_Z) {
-                drawDownLeftCornerSmallWall(j, i, COLOR_BLUE);
-            } else if (val == PACMAN) {
-                if (pacmanSprite == 1) {
-                    pacmanSprite = 2;
-                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT1);
-                } else if (pacmanSprite == 2) {
-                    pacmanSprite = 3;
-                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT2);
-                } else if (pacmanSprite == 3) {
-                    pacmanSprite = 1;
-                    drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
-                }
-            } else if (val == RED) {
-                if (redSprite == 1) {
-                    redSprite = 2;
-                    drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT1);
-                } else {
-                    redSprite = 1;
-                    drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT2);
-                }
-            } else if (val == PACGIRL) {
-            		drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT1);
-            } else if (val == FOOD) {
-                drawFood(j, i, 7);
-            } else if (val == EMPTY) {
-               // drawEmpty(j, i, COLOR_BLACK);
-            } else if (val == POWER_FOOD) {
-                drawPowerFood(j, i, 2);
-            } else if (val == DOOR) {
-                drawDoor(j, i, 6);
-            } else if (val == SHADOW) {
-                if (redSprite == 1) {
-                    redSprite = 2;
-                    drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT1);
-                } else {
-                    redSprite = 1;
-                    drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT2);
-                }
-            } else if (val == CHERRY) {
-                drawCherry(j, i, COLOR_BLACK, COLOR_RED, COLOR_BROWN, COLOR_WHITE, SPRITE_CHERRY);
-            }
-        }
-    }
-
-    _setvisualpage(activePage);
+   }
 }
 
+/**
+ * DOS
+ * 
+ * Нарисовать на экране картинку из файла
+ * x - позиция по горизонтали
+ * y - позиция по вертекали
+ * n - размер массива по y (количество строк в файле)
+ * m - размер массива по x (количество столбцов в файле)
+ */
+void drawImage(int x, int y, const char *fileName, int n, int m) {
+	int k=m+1;
+	char *b = new char[n*k];
+	if (readMapFromFile(fileName, b, n, k)) {
+		drawSprite(x, y, n, m, b);
+	}
+	delete b;
+}
+
+/**
+ * DOS
+ *
+ * Прочитать спрайт из текстового файла
+ * Нарисовать загруженную картинку
+ * fileName - имя файла содержащего картинку в текстовом виде
+ * sx - координата x (левый верхний угол спрайта) где будет отрисован спрайт для загрузки затем в память
+ * sy - координата y (левый верхний угол спрайта) где будет отрисован спрайт для загрузки затем в память
+ * n - количество строк в файле
+ * m - количество столбцов в файле
+ * return - картика содержащая спрайт из указанного файла
+ *
+ * функция так же меняет 
+ */
+char * getImage(int sx, int sy, const char *fileName, int n, int m) {
+	int x = sx * 8;
+	int y = sy * 8;
+	drawImage(sx, sy, fileName, n, m);
+	char *im = (char*) malloc(_imagesize(x, y, x+n, y+m));
+	_getimage(x, y, x+n-1, y+m-1, im);
+	return im;
+}
+
+/**
+ * DOS
+ *
+ * Нарисовать только 1 объект с карты
+ * i - строка в массиве карты
+ * j - столбец в массиве карты
+ */
 void draw(int i, int j) {
     char val = map[i][j] ;
-    if (val == WALL_8) {
-        drawUpWall(j, i, COLOR_BLUE);
-    } else if(val == WALL_4) {
-        drawLeftWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_7) {
-        drawUpLeftCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_6) {
-        drawRightWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_1) {
-        drawDownLeftCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_9) {
-        drawUpRightCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_5) {
-        drawFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_3) {
-        drawDownRightCornerWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_2) {
-        drawDownWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_0) {
-        drawLeftDownPointWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_I) {
-        drawRightDownPointWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_L) {
-        drawRightUpPointWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_D) {
-        drawLeftUpPointWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_X) {
-        drawDownFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_J) {
-        drawLeftDownPointFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_F) {
-        drawRightDownPointFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_S) {
-        drawDownLeftCornerFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_E) {
-        drawDownRightCornerFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_M) {
-        drawUpRightCornerFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_N) {
-        drawUpLeftCornerFullWall(j, i, COLOR_BLUE);
-    } else if (val == WALL_Y) {
-        drawDownRightCornerSmallWall(j, i, COLOR_BLUE);
-    } else if (val ==  WALL_Z) {
-        drawDownLeftCornerSmallWall(j, i, COLOR_BLUE);
-    } else if (val == PACMAN) {
+    int y=i*8;
+    int x=j*8;
+
+    if (val == PACMAN) {
         if (pacmanSprite == 1) {
             pacmanSprite = 2;
             if (dx < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT1);
+                _putimage(x-2, y-2, images[5], _GPSET);
             } else if (dx > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_RIGHT1);
+                _putimage(x-2, y-2, images[7], _GPSET);
             } else if (dy < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_UP1);
+                _putimage(x-2, y-2, images[9], _GPSET);
             } else if (dy > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_DOWN1);
+                _putimage(x-2, y-2, images[11], _GPSET);
             } else {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
+                _putimage(x-2, y-2, images[4], _GPSET);
             }
         } else if (pacmanSprite == 2) {
             pacmanSprite = 3;
             if (dx < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_LEFT2);
+                _putimage(x-2, y-2, images[6], _GPSET);
             } else if (dx > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_RIGHT2);
+                _putimage(x-2, y-2, images[8], _GPSET);
             } else if (dy < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_UP2);
+                _putimage(x-2, y-2, images[10], _GPSET);
             } else if (dy > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_DOWN2);
+                _putimage(x-2, y-2, images[12], _GPSET);
             } else {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
+                _putimage(x-2, y-2, images[4], _GPSET);
             }
         } else if (pacmanSprite == 3) {
             pacmanSprite = 1;
-            drawPacMen(j, i, COLOR_BLACK, COLOR_YELLOW, SPRITE_PACMAN_FULL);
-        }
-    } else if (val == PACGIRL) {
-        if (pacGirlSprite == 1) {
-        	pacGirlSprite = 2;
-            if (dxPacGirl < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_LEFT1);
-            } else if (dxPacGirl > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_RIGHT1);
-            } else if (dyPacGirl < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_UP1);
-            } else if (dyPacGirl > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_DOWN1);
-            } else {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_FULL);
-            }
-        } else if (pacGirlSprite == 2) {
-        	pacGirlSprite = 3;
-            if (dxPacGirl < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_LEFT2);
-            } else if (dxPacGirl > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_RIGHT2);
-            } else if (dyPacGirl < 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_UP2);
-            } else if (dyPacGirl > 0) {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_DOWN2);
-            } else {
-                drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_FULL);
-            }
-        } else if (pacGirlSprite == 3) {
-        	pacGirlSprite = 1;
-            drawPacMen(j, i, COLOR_BLACK, COLOR_TURQUOISE, SPRITE_PACMAN_FULL);
+            _putimage(x-2, y-2,  images[4], _GPSET);
         }
     } else if (val == RED) {
         if (redSprite == 1) {
             redSprite = 2;
             if (dxRed < 0) {
-                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT1);
+            	_putimage(x-2, y-2,images[13], _GPSET);
             } else if (dxRed > 0) {
-                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_RIGHT1);
+            	_putimage(x-2, y-2,images[15], _GPSET);
             } else if (dyRed > 0) {
-            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_DOWN1);
+            	_putimage(x-2, y-2,images[17], _GPSET);
             } else {
-            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_UP1);
+            	_putimage(x-2, y-2,images[19], _GPSET);
             }
         } else {
             redSprite = 1;
             if (dxRed < 0) {
-                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_LEFT2);
+            	_putimage(x-2, y-2,images[14], _GPSET);
             } else if (dxRed > 0) {
-                drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_RIGHT2);
+            	_putimage(x-2, y-2,images[16], _GPSET);
             } else if (dyRed > 0) {
-            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_DOWN2);
+            	_putimage(x-2, y-2,images[18], _GPSET);
             } else {
-            	drawRed(j, i, COLOR_BLACK, COLOR_TURQUOISE, COLOR_BLUE, COLOR_WHITE, SPRITE_RED_SPIRIT_UP2);
+            	_putimage(x-2, y-2,images[20], _GPSET);
             }
         }
-    } else if (val == FOOD) {
-        drawFood(j, i, 7);
-    } else if (val == EMPTY) {
-        drawEmpty(j, i, COLOR_BLACK);
-    } else if (val == POWER_FOOD) {
-        drawPowerFood(j, i, COLOR_GREEN);
-    } else if (val == DOOR) {
-        drawDoor(j, i, 6);
+    } else if (val == PACGIRL) {
+        if (pacGirlSprite == 1) {
+        	pacGirlSprite = 2;
+            if (dxPacGirl < 0) {
+            	_putimage(x-2, y-2, images[25], _GPSET);
+            } else if (dxPacGirl > 0) {
+            	_putimage(x-2, y-2, images[27], _GPSET);
+            } else if (dyPacGirl < 0) {
+            	_putimage(x-2, y-2, images[29], _GPSET);
+            } else if (dyPacGirl > 0) {
+            	_putimage(x-2, y-2, images[31], _GPSET);
+            } else {
+            	_putimage(x-2, y-2, images[24], _GPSET);
+            }
+        } else if (pacGirlSprite == 2) {
+        	pacGirlSprite = 3;
+            if (dxPacGirl < 0) {
+            	_putimage(x-2, y-2, images[26], _GPSET);
+            } else if (dxPacGirl > 0) {
+            	_putimage(x-2, y-2, images[28], _GPSET);
+            } else if (dyPacGirl < 0) {
+            	_putimage(x-2, y-2, images[30], _GPSET);
+            } else if (dyPacGirl > 0) {
+            	_putimage(x-2, y-2, images[32], _GPSET);
+            } else {
+            	_putimage(x-2, y-2, images[24], _GPSET);
+            }
+        } else if (pacGirlSprite == 3) {
+        	pacGirlSprite = 1;
+			if (dxPacGirl != 0) {
+				_putimage(x-2, y-2,  images[24], _GPSET);
+			} else {
+				_putimage(x-2, y-2,  images[33], _GPSET);
+			}
+        }
     } else if (val == SHADOW) {
         if (redSprite == 1) {
             redSprite = 2;
-            drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT1);
+            _putimage(x-2, y-2, images[21], _GPSET);
         } else {
             redSprite = 1;
-            drawShadow(j, i, COLOR_BLACK, COLOR_PURPLE, COLOR_BLUE, COLOR_WHITE, SPRITE_SHADOW_SPIRIT2);
+            _putimage(x-2, y-2, images[22], _GPSET);
         }
+    } else if (val == FOOD) {
+    	_putimage(x-2, y-2, images[1], _GPSET);
+    } else if (val == EMPTY) {
+    	_putimage(x-2, y-2, images[2], _GPSET);
+    } else if (val == POWER_FOOD) {
+    	_putimage(x-2, y-2, images[3], _GPSET);
     } else if (val == CHERRY) {
-        drawCherry(j, i, COLOR_BLACK, COLOR_RED, COLOR_BROWN, COLOR_WHITE, SPRITE_CHERRY);
+    	_putimage(x-2, y-2, images[0], _GPSET);
+    } else if (val == DOOR) {
+    	_putimage(x-2, y-2, images[23], _GPSET);
     }
 }
 
-void refresh_DOS() {
-    //if (activePage == 0) {
-     //   activePage = 1;
-    //} else {
-     //   activePage = 0;
-    //}
-    //_setactivepage(activePage);
+/**
+ * DOS
+ *
+ * Загрузить спрайты и нарисовать всю карту
+ */
+void drawMap() {
+	// массив куда загрузим спрайты стен
+	char * walls[WALL_SIZE];
+	// ключи по которым ищем загруженую в память стену
+	char wkeys[WALL_SIZE];
 
+	// координаты где будет рисоваться спрайт чтоб затем его скопировать в память
+	// после этого спрайт будет рисоваться из памяти сразу весь
+	int sx = 0;
+	int sy = 0;
+	
+	// S__.TXT содержит текстуры для персонажей и объектов что перересовываются
+	// например S10.TXT, S22.TXT
+	char t[8] = "S__.TXT";
+	// буфер для преобразования строк
+	char s[3];
+	
+	// загружаем изображения объектов чо могут перерисовыватся во время игры
+	for (int i=0; i < IMAGES_SIZE; i++) {
+		// имена файлов 2х значные и начинаются с S10.TXT
+		itoa(i+10, s);
+		
+		// заменяем '__' на цифры
+		t[1]=s[0];
+		t[2]=s[1];
+		
+		// запоминаем избражение, из файла t, размеом 14 на 14
+		images[i] = getImage(sx, sy, t, 14, 14);
+		
+		sx+=2;
+		if (sx > MAP_SIZE_X) {
+			sx = 0;
+			sy+=2;
+		}
+	}
+
+    // переключаюсь на другую активную страницу (хотя можно просто очистить экран)
+	activePage = 1;
+	_setactivepage(activePage);
+    _setvisualpage(activePage);
+	
+	
+	// заполняем массив ключей нулями
+	bzero(wkeys, WALL_SIZE);
+	
+    // W_.TXT содержат текстуры картинок стен лаберинта 
+	// например W0.TXT, WL.TXT
+	strcpy(t, "W_.TXT");
+    
+	// рисуем объекты карты которые не перерисовываются или перерисовыатся редко
+	char v;
+    for (int i=0, y=0; i<MAP_SIZE_Y; i++, y=i*8) {
+        for (int j=0, x=0; j<MAP_SIZE_X-1 ; j++, x=j*8) {
+        	v = map[i][j];
+			if (v == FOOD) {
+				// рисуем на карте еду
+            	_putimage(x-2, y-2, images[1], _GPSET);
+            } else if (v == POWER_FOOD) {
+				// рисуем на карте поверапы
+            	_putimage(x-2, y-2, images[3], _GPSET);
+            } else if (!isNotWellOrDoor(i, j)) {
+				// рисуем на карте стены
+				// ищем загружен ли уже спрайт или надо из файла прочитать и отрисовать
+				for (int k=0; k < WALL_SIZE; k++) {
+					if (wkeys[k] == v) {
+						// спрайт загружен, нужно просто отрисовать
+						_putimage(x, y, walls[k], _GPSET);
+						break; 
+					} else if (wkeys[k] == 0) {
+						// спрайт не загружен, нужно загрузить из файла и отрисовать
+						// запоминаем позицию куда загрузим в память спрайт
+						wkeys[k] = v;		
+						// заменяем в "W_.TXT" символ '_' на символ прочитанный из карты
+						t[1] = v;
+						// ресуем избражение из файла t, в позиции j, i размером 8 на 8 и запоминаем в массив walls
+						walls[k] = getImage(j, i, t, 8, 8);
+						break;
+					}
+				}
+			}
+        }
+    }
+
+    draw(doorY, doorX);
+    draw(cherryY, cherryX);
+    draw(redY, redX);
+	draw(pacmanY, pacmanX);
+	draw(pacGirlY, pacGirlX);
+	
+	// удаляем из памяти все стены т.к. их повторно не отрисовываем
+	for(int i=0; i < WALL_SIZE; i++) {
+		free(walls[i]);
+	}
+}
+
+/** 
+ * DOS 
+ *
+ * Перерисовать карту в графическом режиме
+ */
+void draw_DOS() {
+    _setactivepage(activePage);
+    _setvisualpage(activePage);
+
+    drawMap();
+}
+
+/**
+ * DOS
+ *
+ * обновить только поменявшиеся объекты на карте
+ */
+void refresh_DOS() {
     if (refreshCherry) {
         draw(cherryY, cherryX);
         //refreshCherry = 0;
@@ -2017,7 +1603,6 @@ void refresh_DOS() {
     }
 
     if (oldXRed != redX || oldYRed != redY) {
-        drawEmpty(oldXRed, oldYRed, COLOR_BLACK);
         draw(oldYRed, oldXRed);
         draw(redY, redX);
     }
@@ -2031,10 +1616,13 @@ void refresh_DOS() {
         draw(oldPacGirlY, oldPacGirlX);
         draw(pacGirlY, pacGirlX);
     }
-
-    //_setvisualpage(activePage);
 }
 
+/**
+ * DOS
+ *
+ * текущее время в милисекундах
+ */
 long current_timestamp() {
 	struct dosdate_t date;
     struct dostime_t time;
@@ -2044,39 +1632,47 @@ long current_timestamp() {
     // получить текущее время
     _dos_gettime(&time);
     // вычисляем милисекунды
-    long milliseconds = date.day * 44640000L * 60000L + time.hour * 1440000L + time.minute * 60000L + time.second * 1000L + time.hsecond * 10L;
+    long milliseconds = date.day * 34560000L + time.hour * 1440000L + time.minute * 60000L + time.second * 1000L + time.hsecond * 10L;
 
     return milliseconds;
 }
+
+/**
+ * DOS
+ *
+ * удалить объекты спрайтов из памяти
+ */
+void freeImages() {
+	for(int i=0; i < IMAGES_SIZE;i++) {
+		free(images[i]);
+	}
+}
+
+/**
+ * END DOS END DOS END DOS END DOS END DOS END DOS END DOS END DOS  
+ */
 #endif
+
 /**
  * Перерисовать Карту (map[][]), PACMAN, Призраков
  */
 void showMap() {
-    /** Linux */
     #ifdef __linux__
-    system("clear");
-    printf("   Super Turbo Net Pac-Man\n");
-    for(int i = 0; i < mapSizeX; i++) {
-        printf("%s\n",map[i]);
-    }
-    printf("Score %d! To win %d / %d!", score + redBonus + powerBonus + cherryBonus, score, foodToWIN);
+		draw_Linux();
     #else
-    draw_DOS();
+		draw_DOS();
     #endif
 }
 
+/**
+ * Перерисовать только нужные объекты
+ */
 void refreshMap() {
-    /** Linux */
     #ifdef __linux__
-    system("clear");
-    printf("   Super Turbo Net Pac-Man\n");
-    for(int i = 0; i < mapSizeX; i++) {
-        printf("%s\n",map[i]);
-    }
-    printf("Score %d! To win %d / %d!", score + redBonus + powerBonus + cherryBonus, score, foodToWIN);
+		// TODO рисуем все сейчас каждый раз
+		draw_Linux();
     #else
-    refresh_DOS();
+		refresh_DOS();
     #endif
 }
 
@@ -2089,52 +1685,16 @@ void refreshMap() {
  */
 void moveBound(int *x, int *y) {
     if (*x < 0) {
-        *x = mapSizeY - 2;
-    } else if (*x > mapSizeY - 2) {
+        *x = MAP_SIZE_X - 2;
+    } else if (*x > MAP_SIZE_X - 2) {
         *x = 0;
     }
 
     if (*y < 0) {
-        *y = mapSizeX - 1;
-    } else if (*y > mapSizeX - 1) {
+        *y = MAP_SIZE_Y - 1;
+    } else if (*y > MAP_SIZE_Y - 1) {
         *y = 0;
     }
-}
-
-
-/**
- * Клетка по заданным координатам не стена (WALL)
- * y - координата Y на карте (map[][])
- * x - координата X на карте (map[][])
- * return 1 - не стена, 0 - стена
- */
-int isNotWell(int y, int x) {
-    if (map[y][x] != WALL_0 && map[y][x] != WALL_1 && map[y][x] != WALL_2 && map[y][x] != WALL_3
-        && map[y][x] != WALL_4 && map[y][x] != WALL_5 && map[y][x] != WALL_6 && map[y][x] != WALL_7
-        && map[y][x] != WALL_8 && map[y][x] != WALL_9 && map[y][x] != WALL_I && map[y][x] != WALL_L
-        && map[y][x] != WALL_D && map[y][x] != WALL_X && map[y][x] != WALL_J && map[y][x] != WALL_F
-        && map[y][x] != WALL_S && map[y][x] != WALL_E && map[y][x] != WALL_M && map[y][x] != WALL_N
-        && map[y][x] != WALL_Y && map[y][x] != WALL_Z
-        ) {
-        return 1;
-
-    }
-    return 0;
-}
-
-
-/**
- * Клетка по заданным координатам не стена и не дверь (WALL, DOOR)
- * y - координата Y на карте (map[][])
- * x - координата X на карте (map[][])
- * return 1 - не стена и не дверь, 0 - стена или дверь
- */
-int isNotWellOrDoor(int y, int x) {
-    if (isNotWell(y, x) && map[y][x] != DOOR) {
-        return 1;
-
-    }
-    return 0;
 }
 
 /**
@@ -2158,7 +1718,6 @@ void closeDoors() {
     refreshDoor = 1;
 }
 
-
 /**
  * Проиграл ли PACMAN или он мог съесть призрака
  */
@@ -2169,8 +1728,6 @@ int pacmanLooser() {
         if (redFlag) {
             // Конец игры - PACMAN съеден
             map[pacmanY][pacmanX] = RED;
-            // TODO showMap();
-            printf(" Pac-Man LOOSER !!!\n");
             return 1;
         } else {
             // RED съедобен в данный момент
@@ -2233,21 +1790,27 @@ void videoMode() {
     #ifdef __linux__
      //  ничего не делаем, пока в консоли работает
     #else
-    setVideoMode_DOS();
+		setVideoMode_DOS();
 
-    old_apage = getGetActivePage_DOS();
-    old_vpage = getVisualPage_DOS();
+		old_apage = getGetActivePage_DOS();
+		old_vpage = getVisualPage_DOS();
     #endif
 }
 
 /**
  * Вернуть видеорежим
+ * выгрузить картинки из памяти
  */
 void setBackStartVideoMode(int old_apage,int old_vpage) {
     #ifdef __linux__
-     // ничего не делаем, пока в консоли работает
+		 printf("\n");
+		 system("clear");
+		 printf("\n   Super Turbo Net Pac-Man v1.3 for Linux\n");
     #else
-    setBackStartVideoMode_DOS(old_apage, old_vpage);
+		// вернуть старый видеорежим
+		setBackStartVideoMode_DOS(old_apage, old_vpage);
+		// выгрузить из памяти спрайты
+		freeImages();
     #endif
 }
 
@@ -2267,22 +1830,44 @@ void init() {
     pacGirlLastUpdateTime = startTime;
     redTime = startTime;
 
-    for (int i = 0; i < mapSizeX; i++) {
-        for (int j =0; j < mapSizeY ; j++) {
+    // загружаем из файла карту уровня
+    readMapFromFile("MAP.TXT", &map[0][0], MAP_SIZE_Y, MAP_SIZE_X);
+
+    for (int i = 0; i < MAP_SIZE_Y; i++) {
+        for (int j =0; j < MAP_SIZE_X ; j++) {
+
             // надо съесть поверапы и всю еду
             if (map[i][j] == FOOD || map[i][j] == POWER_FOOD) {
                 // сколько очков нужно для выигрыша
                 foodToWIN++;
-            }
+            } else if (map[i][j] == PACMAN) {
+        		pacmanY = i;
+        		pacmanX = j;
+        		foodToWIN++;
+        	} else if (map[i][j] == RED) {
+        		redY = i;
+        		redX = j;
+        		foodToWIN++;
+        	} else if (map[i][j] == PACGIRL) {
+        		pacGirlY = i;
+        		pacGirlX = j;
+        		foodToWIN++;
+        		
+        	    if (appType == SERVER_APPLICATION) {
+        	    	score++;
+        	    } else if (appType == SINGLE_APPLICATION) {
+        	    	map[pacGirlY][pacGirlX] = FOOD;
+        	    }
+        	} else if (map[i][j] == CHERRY) {
+        		cherryY = i;
+        		cherryX = j;
+        		map[cherryY][cherryX] = EMPTY;
+        	}
         }
     }
 
-    map[pacmanY][pacmanX] = PACMAN;
-    map[redY][redX] = RED;
-    if (appType == SERVER_APPLICATION) {
-    	map[pacGirlY][pacGirlX] = PACGIRL;
-    	score++;
-    }
+    printf("\nPress ENTER\n");
+    getchar();
 }
 
 /**
@@ -2324,7 +1909,6 @@ int redState() {
                             if (abs(redY - 1 - pacmanY) < abs(redY - pacmanY)) {
                                 dyRed = -1;
                             }
-
                         }
                     } else {
                         if (isNotWellOrDoor(redY+1, redX)) {
@@ -2335,7 +1919,6 @@ int redState() {
                             dyRed = -1 * (rand() % 2);
                         }
                     }
-
 
                     if (dyRed != 0) {
                         dxRed = 0;
@@ -2374,9 +1957,7 @@ int redState() {
                     if (dxRed != 0) {
                         dyRed = 0;
                     }
-
                 }
-
             } else {
                  if (redX == 15 && redY >= 7 && redY <= 10 ) {
                     dyRed = -1;
@@ -2405,14 +1986,12 @@ int redState() {
 
             }
 
-
             // сеъеи ли PACMAN привидение (или оно нас)
             if (pacmanLooser()) {
                 return 0;
             }
         }
     }
-
 
     if (redFlag) {
         map[redY][redX] = RED;
@@ -2429,9 +2008,9 @@ int redState() {
 */
 void pacmanServer(char * port) {
 	#ifdef __linux__
-		pacmanLinuxServer(port);
+		pacmanServerLinux(port);
 	#else
-	 	 // TODO реализация для DOS
+		pacmanServerDOS(port);
 	#endif
 }
 
@@ -2444,62 +2023,40 @@ void pacmanClient(char * host,  char * port) {
 	#ifdef __linux__
 		pacmanClientLinux(host, port);
 	#else
-		 // TODO реализация для DOS
-	#endif
-}
-
-
-/**
- * Читает клиентом 2 игрока данные из сокета переданные сервером
- * 1 игрока в глобальную переменную buffer (не пересаоздаем его всевремя)
- * а из нее потом все перекладывается в остальные переменные
- */
-void readClientFromServerFromSocket() {
-	#ifdef __linux__
-		readClientFromSocketLinux();
-	#else
-		 // TODO реализация для DOS
+		pacmanClientDOS(host, port);
 	#endif
 }
 
 /**
- * Cоздает пакет с данными о положении персонажей
- * для отправки с сервера клиенту 2-го игрока
- *
  * отправляет через интерфейс сокетов сформерованный пакет
  * данные записываются в глобальный массив buffer
  * затем записываются в сокет
+ *
+ * - Cоздает пакет с данными о положении персонажей
+ *   для отправки с сервера клиенту 2-го игрока
+ *
+ * - Отправляет на сервер данные с клиента 2-го игрока
+ * 	 шлем на сервер только нажатую на клавиатуре кнопку 2м игроком
  */
-void writeServerToClientInSocket() {
+void writeInSocket() {
 	#ifdef __linux__
-		writeServerInSocketLinux();
+		writeInSocketLinux();
 	#else
-		 // TODO реализация для DOS
+		writeInSocketDOS();
 	#endif
 }
 
 /**
- * Отправляет на сервер данные с клиента 2-го игрока
- * шлем на сервер только нажатую на клавиатуре кнопку
- * 2м игроком
+ * Читаем данные посланные по сети
+ * в глобальную переменную buffer (не пересаоздаем его всевремя)
+ * - какую кнопку на клавиатуре нажал 2 игрок - для сервера
+ * - данные об объектах и очках - для клиента
  */
-void writeClientInSocket() {
+void readFromSocket() {
 	#ifdef __linux__
-		writeClientInSocketLinux();
+		readFromSocketLinux();
 	#else
-		 // TODO реализация для DOS
-	#endif
-}
-
-/**
- * Читаем на сервере данные посланные с клиента 2го игрока
- * какую кнопку на клавиатуре он нажал
- */
-void readServerFromSocket() {
-	#ifdef __linux__
-		readServerFromSocketLinux();
-	#else
-		 // TODO реализация для DOS
+		readFromSocketDOS();
 	#endif
 }
 
@@ -2510,7 +2067,7 @@ void closeSockets() {
 	#ifdef __linux__
 		closeSocketsLinux();
 	#else
-		 // TODO реализация для DOS
+		closeSocketsDOS();
 	#endif
 }
 
@@ -2667,7 +2224,7 @@ void player2() {
 	// сбрасываем значение ранее нажатой кнопки
 	player2PressKey = EMPTY;
 	// пробуем прочитать данные из сокета
-	readServerFromSocket();
+	readFromSocket();
 	switch (player2PressKey) {
 		// key UP
 		case 65: // Linux
@@ -2706,7 +2263,7 @@ void player2() {
  * 		d - вправо
  * 		w - вверх
  */
-void player1(int ch) {
+void player1(int ch) { 
 	switch (ch) {
 	// key UP
 	case 65: // Linux
@@ -2765,9 +2322,11 @@ void refreshSingleGame() {
 			|| oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
 		// если игра сетевая, надо отправить данные о карте
 		// 2у игроку, для чего записываем данные в сокет
+		
 		if (appType == SERVER_APPLICATION && !connectionLost) {
-			writeServerToClientInSocket();
+			writeInSocket();
 		}
+		
 		refreshMap();
 	}
 	// надо ли RED перейти в режим погони
@@ -2839,7 +2398,7 @@ int gameClientMode() {
 
 	do {
 		// читаем данные о карте / персонажах с сервера
-		readClientFromServerFromSocket();
+		readFromSocket();
 
 		if (connectionLost) {
 			// если соединение потеряно, завершаем игру
@@ -2852,11 +2411,10 @@ int gameClientMode() {
 		if (kbhit()) {
 			// оределяем какая кнопка нажата
 			ch = getch(); // Linux getchar() ;
-			if (ch == 0)
-				ch = getch(); // only DOS
+			if (ch == 0) ch = getch(); // only DOS
 			player2PressKey = ch;
 
-			writeClientInSocket();
+			writeInSocket();
 
 			if (connectionLost) {
 				// если соединение потеряно, завершаем игру
@@ -2894,6 +2452,7 @@ int game() {
 			player1(ch);
 		}
 
+		
 		if (appType == SERVER_APPLICATION && !connectionLost) {
 			// Если игра сетевая, нужно обработать нажатые 2м пользователем
 			// в своем клиенте кнопки сервером, для этого
@@ -2901,50 +2460,51 @@ int game() {
 			player2();
 		}
 
-
-		/** Pac-Man **/
+		// Pac-Man
 		if (!pacManState()) {
 			return 0;
 		}
 
 
-		/** RED */
+		// RED 
 		if (!redState()) {
 			return 0;
 		}
 
-		/** Pac-Girl **/
+		// Pac-Girl
 		if (!pacGirlState() ) {
 			return 0;
 		}
 
 	// Выход из игры 'q'
 	} while(ch != 'q');
-
+	
 	return 1;
 }
 
+
 int main(int argc, char *argv[]) {
+   printf("\nSuper Turbo NET Pac-Man v1.3\n");
    if (argc == 2) {
 		// запущен как сервер
-	    printf("Запущен как сервер, жду подключения 2го игрока!\n");
+	   
+	    printf("Server wait PAC-GIRL!\n");
 		pacmanServer(argv[1]);
 		if (appType == SERVER_APPLICATION) {
-			printf("2 игрок подключился, нажмити любую клавишу!\n");
+			printf("Start Net GAME!\n");
 		} else {
-			printf("Не удалось создать сервер!\nНажмити любую клавишу для игры одному!\n");
+			printf("No Net GAME!\n");
 		}
-		getchar();
+		
 	} else 	if (argc == 3) {
-		printf("Запущен как клиент\n");
+		printf("Client\n");
 		// запущен как клиент
 		pacmanClient(argv[1], argv[2]);
 		if (appType == CLIENT_APPLICATION) {
-			printf("Вы подключилсь к серверу!\n");
+			printf("Start NET GAME\n");
 		} else {
-			printf("Не удалось подключится к серверу!\nНажмити любую клавишу для игры одному!\n");
+			printf("No Net GAME!\n");
 		}
-
 	}
 
     srand(time(NULL));
@@ -2958,30 +2518,37 @@ int main(int argc, char *argv[]) {
     // нарисовать карту и персонажей на экране
     showMap();
 
+	
     if (appType == CLIENT_APPLICATION) {
     	gameClientMode();
     } else {
     	game();
     	// Надо обновить данные на клиенте 2го плеера
+    	
 		if (appType == SERVER_APPLICATION && !connectionLost) {
-			writeServerToClientInSocket();
+			writeInSocket();
 		}
+		
     }
 
     // обновить карту и персонажей на экране
     refreshMap();
 
-    // вернуть видеорежим
+    // вернуть видеорежим и вынрузить картинки из памяти для DOS
     setBackStartVideoMode(old_apage, old_vpage);
+
+	// набранные очки 
+	printf("\nScore %d\n", score + redBonus + powerBonus + cherryBonus);
 
     // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
     if (score >= foodToWIN) {
-    	printf("\nPac-Man & Pac-Girl WINER !!!\n");
+    	printf("\n YOU WINNER :)!\n");
     } else {
-    	printf("\nPac-Man - LOOSER OWNED BY SPIRIT :(\n");
+    	printf("\n YOU LOOSER :(\n");
     }
 
     // закрыть сокеты
     closeSockets();
+	printf(" GAME OVER!\n \nDeveloper: BlodTor\nDisigners: Eva & Lisa\n\n\t2022\n");
     return 0;
 }
