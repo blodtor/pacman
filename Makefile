@@ -5,9 +5,9 @@
 # 
 # хотя можно и просто: 
 # gcc pacman.cpp
-
-# объектный файл под linux
-OBJS = pacman.o
+#
+# или если для Xов то так: 
+# g++ -o xpacman xpacman.cpp -lX11
 
 # собрать под linux для debug 
 #	CFLAGS += -g
@@ -21,18 +21,22 @@ CFLAGS += -O2
 
 
 # собираем под Linux с удалением файлов прошлой сборки
-all:	clean pacman
+all:	clean pacman xpacman
 
-# собрать под Linux
-linux: pacman
-
-pacman:	$(OBJS)
+pacman:	pacman.o
 	$(CXX) $(LDFLAGS) -o $@ $^
 	$(EXTRA_CMDS)
+
+xpacman: xpacman.o
+	$(CXX) $(LDFLAGS) -o $@ $^ -lX11 
+	$(EXTRA_CMDS) 
 
 pacman.o:	pacman.cpp
 	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
+xpacman.o:	xpacman.cpp
+	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< 
+
 # удвлить фалы сборки под Linux
 clean:
-	rm -fr pacman $(OBJS) $(EXTRA_CLEAN)
+	rm -fr pacman pacman.o xpacman xpacman.o $(EXTRA_CLEAN)

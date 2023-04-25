@@ -1,23 +1,24 @@
 /**
-Super Turbo NET Pac-Man v1.3
-реализация Pac-Man для DOS (IBM PC XT Intel 8088) и GNU/Linux
+Super Turbo NET Pac-Man v1.4
+порт под GNU/Linux для X сервера (это НЕ консольная версия, без Xов не будет работать!)
+на основе библиотеки XLib
 
-Для Linux собирается gcc
-> gcc pacman.cpp
+Для Linux собирается g++
+> make
+или
+> g++ -o xpacman xpacman.cpp -lX11
 
-Для DOS собирается Open Watcom - http://www.openwatcom.org/
-> wmake
+может соеденятся по сети с версией v1.3 (DOS версия и консольная для GNU/Linux)
 
-Драйвер для Intel 8∕16 LAN Adapter
-https://www.vogonswiki.com/index.php/Intel_8%E2%88%9516_LAN_Adapter
+запустить не сетевую игру (хотя можно потом ввести порт или:
+> ./xpacman
+или как сервер на порту 7777 (порт можно любой)
+> ./xpacman 7777
+или как клиент который соединится с хостом localhost на порт 7777 (хост и порт любые можно)
+> ./xpacman localhost 7777
 
-A Guide to Networking in DOS
-http://dosdays.co.uk/topics/networking_in_dos.php
 
-mTCP - TCP/IP applications for your PC compatible retro-computers
-http://brutmanlabs.org/mTCP/
 */
-
 
 #include <stdio.h>
 #include <string.h>
@@ -28,29 +29,17 @@ http://brutmanlabs.org/mTCP/
 #include <errno.h>
 
 // Linux
-#ifdef __linux__
 #include <sys/time.h>   //gettime
 #include <termios.h>
 #include <sys/types.h>  // TCP/IP
 #include <sys/socket.h> // TCP/IP
 #include <netinet/in.h> // TCP/IP
-#include <netdb.h>      // TCP/IP 
-#else
-// DOS
-#include <dos.h>      	// gettime
-#include <conio.h>    	// kbhit
-#include <graph.h>    	// 2D graphics 
-#include <malloc.h>   	// malloc / free 
-#include <bios.h>     	// mTCP keybord handlers
-#include <io.h>       	// open file
-#include "types.h"    	// mTCP
-#include "packet.h"   	// mTCP
-#include "arp.h"      	// mTCP
-#include "udp.h"      	// mTCP
-#include "dns.h"      	// mTCP
-#include "tcp.h"      	// mTCP
-#include "tcpsockm.h" 	// mTCP
-#endif
+#include <netdb.h>      // TCP/IP
+
+// X11
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/Xos.h>
 
 // скорость перехода pacman с одной клетки на другую в милисекундах
 const long PACMAN_SPEED = 150L;
@@ -238,10 +227,10 @@ long pacGirlLastUpdateTime;
 #define MAP_SIZE_X (32)
 
 // карта занружается из файла MAP.TXT
-char map[MAP_SIZE_Y][MAP_SIZE_X]; 
+char map[MAP_SIZE_Y][MAP_SIZE_X];
 
 /**
- * Пример карты 
+ * Пример карты
 = {
     "7888888888888895788888888888889",
     "4.............654.............6",
@@ -274,8 +263,26 @@ char map[MAP_SIZE_Y][MAP_SIZE_X];
  */
 #define IMAGES_SIZE (34)
 
+
 /**
- * Изображение спрайтов 
+ * Количество видов стен загружаемых из файлов как спрайты
+ */
+#define WALL_SIZE (22)
+
+// серверный socket - ждет подключения клиентов
+// использует только сервер
+int serverSocket;
+
+// клиентский socket
+// запустились как сервер или как клиент 2-го игрока
+// всегда в этот сокет пишем или читаем данные
+// отправить на сервер / клиент 2-го игрока
+// прочитать данные на сервере / клиенте 2-го игрока
+int clientSocket;
+
+// массив куда загрузим спрайты больших объектов для X11
+/**
+ * Изображение спрайтов
  *
  * Спрайты заружаются из файлов:
  * S10.TXT - Спрайт вишни
@@ -287,7 +294,7 @@ char map[MAP_SIZE_Y][MAP_SIZE_X];
  * S31.TXT - S32.TXT - Спрайты shadow (котороо можно есть)
  * S33.TXT - Спрайт двери
  * S34.TXT - S43.TXT - Спрайты pac-girl
- * 
+ *
  * W1.TXT - WZ.TXT - спрайты стен (НЕ ХРАНЯТСЯ В ЭТОЙ ПЕРЕМЕННОЙ)
  *
  * значения цветов в файлах спрайтов
@@ -297,26 +304,76 @@ char map[MAP_SIZE_Y][MAP_SIZE_X];
  * 4  - красный цвет
  * 5  - пурпурный цвет
  * 6  - коричневый цвет
- * 7  - серый цвет      
+ * 7  - серый цвет
  * 8  - желтый цвет (в DOS 14)
  * 9  - белый цвет  (в DOS 15)
  */
-char * images[IMAGES_SIZE];
+Pixmap pixmaps[IMAGES_SIZE];
 
-/**
- * Количество видов стен загружаемых из файлов как спрайты
- */
-#define WALL_SIZE (23)
+// массив куда загрузим спрайты стен для X11
+Pixmap walls[WALL_SIZE];
 
+// цвета для X11
+XColor colorRed, colorGreen, colorBlue, colorBlack, colorDarkViolet, colorBrown, colorGray, colorYellow, colorWhite;
+// максимальное   количество символов для ввода Хоста и порта для X11 окна
+#define INPUT_TEXT_LENGHT 30
 
-// активная видео страница при запуске  
-int old_apage;
+// данные поля ввода для Хоста и порта сервера
+char serverHostPort[INPUT_TEXT_LENGHT];
 
-// отображаемая видео страница  
-int old_vpage;
+// Y координата для надписи Server и того что вводим с клавиатуры
+#define INPUT_TEXT_Y 215
 
-// активная видео страница
-int activePage = 0;
+// Координата X левого верхнего угла окна X11
+#define X 0
+
+//Координата Y левого верхнего угла окна X11
+#define Y 0
+
+// ширина окна X11
+#define WIDTH 400
+
+// высота окна X11
+#define HEIGHT 220
+
+// минимальная ширина окна X11
+#define WIDTH_MIN 400
+
+// минимальная высота  окна X11
+#define HEIGHT_MIN 220
+
+// ширина бардюра окна X11
+#define BORDER_WIDTH 5
+
+// Заголовок окна X11
+#define TITLE "Super Turbo NET Pac-Man v1.4"
+
+// Заголовок пиктограммы окна X11
+#define ICON_TITLE "xpacman"
+
+// Класс программы X11
+#define PRG_CLASS "xpacman"
+
+// Указатель на структуру Display X11
+Display *display;
+
+// Номер экрана
+int ScreenNumber;
+
+// Графический контекст X11
+GC gc;
+
+// Событие от X11
+XEvent xEvent;
+
+// Окно X11
+Window window;
+
+// выбранный хост или порт если хост не задавался
+char param1[INPUT_TEXT_LENGHT];
+
+// выбранный порт
+char param2[INPUT_TEXT_LENGHT];
 
 /**
  * чтение из текстового файла массива
@@ -330,6 +387,7 @@ int readMapFromFile(const char *fileName, char *buff, int n, int m) {
 	char s[33];
 
 	fp = fopen(fileName, "r");
+
 	if (fp != NULL) {
 	   for (int i =0; i < n; i++) {
 		   if (fgets(s, m + 1, fp) != NULL) {
@@ -367,18 +425,18 @@ void itoa(int n, char s[]) {
     int i, sign;
 
     if ((sign = n) < 0) {
-        n = -n;     
+        n = -n;
 	}
-	
+
     i = 0;
-    do {       
-        s[i++] = n % 10 + '0';   
-    } while ((n /= 10) > 0); 
-    
+    do {
+        s[i++] = n % 10 + '0';
+    } while ((n /= 10) > 0);
+
     if (sign < 0) {
         s[i++] = '-';
 	}
-	
+
     s[i] = '\0';
     reverse(s);
 }
@@ -549,7 +607,7 @@ void createBuffer() {
 }
 
 /**
- * Парсим данные пришедшие по сети 
+ * Парсим данные пришедшие по сети
  */
 void parseBuffer() {
 	int i=0;
@@ -596,23 +654,6 @@ void parseBuffer() {
 }
 
 /**
- * Тут идут функции только для Linux
- * Linux Linux Linux Linux Linux Linux Linux Linux Linux Linux Linux 
- */
-#ifdef __linux__
-
-// серверный socket - ждет подключения клиентов
-// использует только сервер
-int serverSocket;
-
-// клиентский socket
-// запустились как сервер или как клиент 2-го игрока
-// всегда в этот сокет пишем или читаем данные
-// отправить на сервер / клиент 2-го игрока
-// прочитать данные на сервере / клиенте 2-го игрока
-int clientSocket;
-
-/**
  * Linux
  *
  * Создание сервера
@@ -645,7 +686,7 @@ void pacmanServerLinux(char * port) {
 
 		// пробуем занять порт
 		if (bind(serverSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0) {
-			printf("\nERROR bind\n");
+			printf("\nERROR bind port '%s'\n", port);
 		} else {
 			// устанавливаем  serverSocket в состояние прослушивания, будет использоваться для
 			// приёма запросов входящих соединений с помощью accept()
@@ -737,7 +778,7 @@ void writeInSocketLinux() {
 
 	// создаем пакет с данными в buffer для передачи по сети
 	createBuffer();
-	
+
 	int n;
 	if (appType == SERVER_APPLICATION) {
 		// записываем buffer в сокет (отправляем 2-му игроку)
@@ -785,7 +826,7 @@ void readFromSocketLinux() {
 		} else {
 			n = read(clientSocket, buffer, RECV_BUFFER_SIZE);
 		}
-		
+
 		if (n < 1) {
 			if (appType == SERVER_APPLICATION) {
 				printf("\nPac-Girl OFF\n");
@@ -885,683 +926,311 @@ long long current_timestamp() {
     return milliseconds;
 }
 
-/**
- *  Linux 
- *
- *  Перерисовать карту в терменале!
- */
-void draw_Linux() {
-    system("clear");
-    printf("   Super Turbo Net Pac-Man\n");
-    for(int i = 0; i < MAP_SIZE_Y; i++) {
-        printf("%s\n",map[i]);
-    }
-    printf("Score %d! To win %d / %d!", score + redBonus + powerBonus + cherryBonus, score, foodToWIN);
-}
 
 /**
- * END Linux END Linux END Linux END Linux END Linux END Linux END Linux 
- */
-#else
-/**
- * DOS DOS DOS DOS DOS DOS DOS DOS DOS DOS DOS
- * Тут идут функции и переменные только для DOS
- */
-
-// Нажата ли ctrl Break
-volatile uint8_t ctrlBreakDetected = 0;
-
-// серверный socket - ждет подключения клиентов
-// использует только сервер
-TcpSocket *serverSocket;
-
-// клиентский socket
-// запустились как сервер или как клиент 2-го игрока
-// всегда в этот сокет пишем или читаем данные
-// отправить на сервер / клиент 2-го игрока
-// прочитать данные на сервере / клиенте 2-го игрока
-TcpSocket *clientSocket;
-
-/**
- * DOS
+ * XLib
  *
- * callback нажатия Сtrl+Break
- */
-void __interrupt __far ctrlBreakHandler() {
-	ctrlBreakDetected = 1;
-}
-
-/**
- * DOS
- *
- * callback нажатия Ctrl+C
- */
-void __interrupt __far ctrlCHandler() {
-	// Ничего не делаем
-}
-
-/**
- * DOS
- *
- * выгрузить TCP/IP стек
- */
-static void shutdown() {
-    // Если этого не сделать, операционная система перестанет работать из-за зависшего прерывания таймера.
-    Utils::endStack();
-}
-
-/**
- * DOS
- *
- * Создание сервера
- * port - порт на катором поднимется сервер
- */
-void pacmanServerDOS(char * port) {
-	// порт сервера на который ждем подключение клиента
-	uint16_t serverPort = atoi(port);
-    // Все программы mTCP должны прочитать файл конфигурации mTCP, чтобы узнать, какое прерывание использует пакетный драйвер,
-    // каков IP-адрес и сетевая маска, а также некоторые другие необязательные параметры.
-	//printf("\nparseEnv");
-	if (Utils::parseEnv() != 0) {
-		printf("\nERROR parseEnv\n");
-	} else {
-		//printf("-OK\n");
-	    // Инициализировать TCP/IP стек.
-	    // Первый параметр - количество создаваемых TCP сокетов.
-	    // Второй параметр - количество исходящих TCP-буферов, которые необходимо создать.
-	    // Параметры три и четыре - пользовательские обработчики Ctrl-Break и Ctrl-C.
-	    // Если функция возвращает не нуль, это говорит о том, что была ошибка, и программа должна завершиться.
-	    // Наиболее распространённой ошибкой является невозможность найти пакетный драйвер, поскольку он не был загружен или был загружен с неправильным номером прерывания.
-		//printf("\ninitStack");
-	    if (Utils::initStack(2, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlCHandler)) {
-	    	printf("\nERROR failed to initialize TCP/IP\n");
-	    } else {
-	    	//printf("-OK\n");
-	    	// создали серверный сокет
-	    	//printf("\ngetSocket");
-	    	serverSocket = TcpSocketMgr::getSocket();
-	    	//printf("-OK\n");
-	    	// пробуем занять порт
-	    	//printf("\nlisten");
-	    	serverSocket->listen(serverPort, RECV_BUFFER_SIZE);
-	    	//printf("-OK\n");
-
-	        // Ждем подключения клиента is non-blocking!
-	        while (1) {
-
-	          if (ctrlBreakDetected) {
-	        	// Пользователь нажал Ctrl+C.
-	            break;
-	          }
-
-	          //printf("\nPACKET_PROCESS_SINGLE");
-	          PACKET_PROCESS_SINGLE;
-	          //printf("-OK\n");
-
-	          //printf("\ndriveArp");
-	          Arp::driveArp();
-	          //printf("-OK\n");
-
-	          //printf("\ndrivePackets");
-	          Tcp::drivePackets();
-	          //printf("-OK\n");
-
-	          //printf("\naccept");
-	          clientSocket = TcpSocketMgr::accept();
-	          if (clientSocket != NULL) {
-		          //printf("-OK\n");
-	        	  serverSocket->close();
-	        	  TcpSocketMgr::freeSocket(serverSocket);
-				  // сервер поднят успешно и соеденился с клиентом 2-го игрока
-				  connectionLost = 0;
-				  // мы являемся сервером
-				  appType = SERVER_APPLICATION;
-	        	  break;
-	          }
-
-	          if (_bios_keybrd(1) != 0) {
-				char c = _bios_keybrd(0);
-
-				if ((c == 27) || (c == 3)) {
-					break;
-				}
-	          }
-	        }
-
-	        if (appType != SERVER_APPLICATION) {
-	        	shutdown();
-	        }
-	    }
-	}
-}
-
-
-/**
- * DOS
- *
- * Подключение к серверу клиента 2 игрока
- * host - хост на котором работает сервер
- * port - порт на катором работает сервер
- */
-void pacmanClientDOS(char * host, char * port) {
-	// printf("Порт: '%s' Хост: '%s'\n", port, host);
-	// порт сервера на который ждем подключение клиента
-	uint16_t serverPort = atoi(port);
-    // Все программы mTCP должны прочитать файл конфигурации mTCP, чтобы узнать, какое прерывание использует пакетный драйвер,
-    // каков IP-адрес и сетевая маска, а также некоторые другие необязательные параметры.
-	//printf("\nparseEnv");
-	if (Utils::parseEnv() != 0) {
-		printf("\nERROR parseEnv\n");
-	} else {
-		//printf("-OK\n");
-	    // Инициализировать TCP/IP стек.
-	    // Первый параметр - количество создаваемых TCP сокетов.
-	    // Второй параметр - количество исходящих TCP-буферов, которые необходимо создать.
-	    // Параметры три и четыре - пользовательские обработчики Ctrl-Break и Ctrl-C.
-	    // Если функция возвращает не нуль, это говорит о том, что была ошибка, и программа должна завершиться.
-	    // Наиболее распространённой ошибкой является невозможность найти пакетный драйвер, поскольку он не был загружен или был загружен с неправильным номером прерывания.
-		//printf("\ninitStack");
-	    if (Utils::initStack(2, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlCHandler)) {
-	    	printf("\nERROR initialize TCP/IP\n");
-	    } else {
-	    	//printf("-OK\n");
-			// структура содержащая адрес сервера
-			IpAddr_t serverAddress;
-			//nt16_t lclPort = 2048;
-
-			// Если был задан числовой IP-адрес, первый вызов Dns::resolve разрешит его, и не придётся ждать.
-			// Иначе, нужно в цикле дождаться завершения работы DNS.
-			//printf("\nresolve");
-			int8_t rc2 = Dns::resolve(host, serverAddress, 1);
-			if (rc2 < 0) {
-				printf("\nError resolving Server\n" );
-				shutdown();
-			} else {
-				//printf("-OK\n");
-		        while (1) {
-		            if (ctrlBreakDetected) break;
-		            if (!Dns::isQueryPending()) break;
-
-		            // Цикл должен обрабатывать входящие пакеты, при необходимости повторять запросы ARP и повторять запросы DNS.
-		            //printf("\nPACKET_PROCESS_SINGLE");
-		            PACKET_PROCESS_SINGLE;
-		            //printf("-OK\n");
-
-		            //printf("\ndriveArp");
-		            Arp::driveArp();
-		            //printf("-OK\n");
-
-		            //printf("\ndrivePackets");
-		            Tcp::drivePackets();
-		            //printf("-OK\n");
-
-		            // Реализация DNS основана на UDP.
-		            // Dns::drivePendingQuery нужен потому, что пакеты UDP могут быть потеряны, и нужен способ определить, нужно ли нам повторно отправить наш DNS-запрос.
-		            //printf("\ndrivePendingQuery");
-		            Dns::drivePendingQuery();
-		            //printf("-OK\n");
-		        }
-		        // Ещё один вызов Dns::resolve вернёт окончательный результат.
-		        //printf("\nresolve2");
-		        rc2 = Dns::resolve(host, serverAddress, 0);
-		        if (rc2 < 0) {
-					printf("\nError resolving Server\n" );
-					shutdown();
-				} else {
-					//printf("-OK\n");
-			        // Выделить сокет.
-			        // mTCP владеет структурами данных сокета. Пользователь получает указатель на них.
-			        // Вызов TcpSocketMgr::getSocket() предоставляет сокет для использования.
-			        // Когда работа будет закончена, его нужно вернуть с помощью вызова TcpSocketMgr::freeSocket().
-					//printf("\ngetSocket");
-					clientSocket = TcpSocketMgr::getSocket();
-					//printf("-OK\n");
-
-			        // Установить размер приёмного буфера.
-					//printf("\nsetRecvBuffer");
-					clientSocket->setRecvBuffer(RECV_BUFFER_SIZE);
-					//printf("-OK\n");
-
-					// Выполнить неблокирующее соединение, ожидать 10 секунд перед тем, как выдать ошибку.
-					printf("\nconnect");
-					int8_t rc = clientSocket->connect(2048, serverAddress, serverPort, 10000);
-					if (rc != 0) {
-					    printf("ERROR Socket open failed\n" );
-					    shutdown();
-					} else {
-						printf("-OK\n");
-						// клиент 2-го игрока успешно соединился с сервером
-						connectionLost = 0;
-						// мы являемся клиентом
-						appType = CLIENT_APPLICATION;
-					}
-				}
-			}
-	    }
-	}
-}
-
-/**
- * DOS
- *
- * Читает клиентом 2 игрока данные из сокета переданные сервером
- * 1 игрока в глобальную переменную buffer (не пересаоздаем его всевремя)
- * а из нее потом все перекладывается в остальные  переменные
- */
-void readFromSocketDOS() {
-    // Обработка входящих пакетов.
-    // PACKET_PROCESS_SINGLE - это макрос, проверяющий наличие новых пакетов от драйвера пакетов.
-    // Если таковые обнаружены, макрос обрабатывает эти пакеты.
-    PACKET_PROCESS_SINGLE;
-    // Arp::driveArp() используется для проверки ожидающих запросов ARP и повторения их при необходимости.
-    Arp::driveArp();
-    // Tcp::drivePackets() используется для отправки пакетов, которые были поставлены в очередь для отправки.
-    Tcp::drivePackets();
-
-    if (clientSocket->isRemoteClosed()) {
-        // Сокет был закрыт удалённой стороной.
-    	connectionLost = 1;
-    } else {
-		// очищаем буфер
-		bzero(buffer, RECV_BUFFER_SIZE);
-
-		// проверяем можно ли что то прочитать из сокета
-        // Если сокет не закрыт, то код попытается получить на него данные.
-        // Код возврата 0 указывает на отсутствие данных.
-        // Отрицательный код возврата указывает на ошибку сокета, а положительный код возврата - количество полученных байтов.
-        int16_t n = 0;
-		if (appType == SERVER_APPLICATION) {
-			n = clientSocket->recv(buffer, 1);
-		} else {
-			n = clientSocket->recv(buffer, RECV_BUFFER_SIZE);
-		}
-		
-       	if (n < 0) {
-			connectionLost = 1;
-		} else if (n > 0 && buffer[0] != 0) {
-			// парсим данные пришедшие по сети
-			parseBuffer();
-		}
-    }
-}
-
-
-/**
- * DOS
- *
- * Отправляет на сервер данные с клиента 2-го игрока
- * шлем на сервер только нажатую на клавиатуре кнопку
- * 2м игроком
- */
-void writeInSocketDOS() {
-    // Обработка входящих пакетов.
-    // PACKET_PROCESS_SINGLE - это макрос, проверяющий наличие новых пакетов от драйвера пакетов.
-    // Если таковые обнаружены, макрос обрабатывает эти пакеты.
-    PACKET_PROCESS_SINGLE;
-    // Arp::driveArp() используется для проверки ожидающих запросов ARP и повторения их при необходимости.
-    Arp::driveArp();
-    // Tcp::drivePackets() используется для отправки пакетов, которые были поставлены в очередь для отправки.
-    Tcp::drivePackets();
-
-    if (clientSocket->isRemoteClosed()) {
-        // Сокет был закрыт удалённой стороной.
-    	connectionLost = 1;
-    } else {
-		// очищаем буфер
-		bzero(buffer, RECV_BUFFER_SIZE);
-		
-		// создаем пакт данных в buffer для отправки по сети
-		createBuffer();
-		
-		int8_t n;
-		if (appType == SERVER_APPLICATION) {
-			// записываем buffer в сокет (отправляем 2-му игроку)
-			n = clientSocket->send(buffer, RECV_BUFFER_SIZE);
-		} else {
-			// записываем buffer в сокет (отправляем на Сервер)
-			n = clientSocket->send(buffer, 1);
-		}
-		
-		if (n < 0) {
-			connectionLost = 1;
-		}
-    }
-}
-
-/**
- * DOS
- *
- * Закрыть сокеты
- */
-void closeSocketsDOS() {
-	if (appType == CLIENT_APPLICATION || appType == SERVER_APPLICATION) {
-	     if (clientSocket != NULL) {
-	    	 clientSocket->close();
-	    	 TcpSocketMgr::freeSocket(clientSocket);
-	     }
-	     shutdown();
-	}
-}
-
-/**
- * DOS
- *
- * Установить разрешение 320 x 200 с 16 цетами 
- */
-void setVideoMode_DOS() {
-    // 320 x 200 16 colors
-    _setvideomode(_MRES16COLOR); 
-}
-
-/** 
- * DOS
- *
- * Получить активную видео страницу  
- */
-int getGetActivePage_DOS() {
-    return _getactivepage();
-}
-
-/** 
- * DOS
- *
- * Получить отображаемую видео страницу  
- */
-int getVisualPage_DOS() {
-    return _getvisualpage();
-}
-
-/** 
- * DOS
- *
- * Установить назад видеорежим что был при старте
- */
-void setBackStartVideoMode_DOS(int old_apage, int old_vpage) {
-    _setactivepage(old_apage);
-    _setvisualpage(old_vpage);
-    _setvideomode(_DEFAULTMODE);
-
-    printf("\n   Super Turbo Net Pac-Man v1.3 for DOS (IBM PC XT Intel 8088)\n");
-}
-
-/**
- * DOS
- *
- * Нарисовать на экране спрайт из буфера
+ * Нарисовать в Pixmap спрайт из буфера
  * x - позиция по горизонтали
  * y - позиция по вертекали
  * n - размер массива по y (количество строк в файле)
  * m - размер массива по x (количество столбцов в файле)
  * buff - массив с данными из текстового файла
  */
-void drawSprite(int x, int y, int n, int m, char *buff) {
-   int dx = x*8;
-   int dy = y*8;
+ void drawSprite(int n, int m, char *buff, Pixmap pixmap) {
    char txt[2];
    for(int i = 0; i < n; i++) {
 	   for (int j=0; j < m; j++) {
-		   txt[0] = buff[i * n + j + i]; 
+		   txt[0] = buff[i * n + j + i];
 		   txt[1] = '\0';
 		   int val = atoi(txt);
-		   if (val > 7) {
-			   // желтый в файле 8 а на самам деле 14
-			   // белый в файле 9 а на самом деле 15
-			   val+=6;
-		   } 
-		   _setcolor(val);
-		   _setpixel(dx+j, dy+i);
+
+		   switch(val) {
+		   	   case 0: // черный цвет
+		   		 XSetForeground(display, gc, colorBlack.pixel);
+		   	   break;
+			   case 1: // синий цвет
+				 XSetForeground(display, gc, colorBlue.pixel);
+			   break;
+		   	   case 2: // зеленый цвет
+		   		 XSetForeground(display, gc, colorGreen.pixel);
+		   	   break;
+		   	   case 4: // красный цвет
+		   		 XSetForeground(display, gc, colorRed.pixel);
+		   	   break;
+		   	   case 5: // пурпурный цвет
+		   		 XSetForeground(display, gc, colorDarkViolet.pixel);
+		   	   break;
+		   	   case 6: // коричневый цвет
+		   	     XSetForeground(display, gc, colorBrown.pixel);
+		   	   break;
+		   	   case 7: // серый цвет
+		   		 XSetForeground(display, gc, colorGray.pixel);
+		   	   break;
+		   	   case 8: // желтый цвет
+		   		 XSetForeground(display, gc, colorYellow.pixel);
+		   	   break;
+		   	   case 9: // белый цвет
+		   		 XSetForeground(display, gc, colorWhite.pixel);
+		   	   break;
+		   	   default:
+		   		XSetForeground(display, gc, colorBlack.pixel);
+		   }
+
+		   // рисуем точку в пикселоной карте
+		   XDrawPoint(display, pixmap, gc, j, i);
 	   }
 
    }
 }
 
 /**
- * DOS
- * 
- * Нарисовать на экране картинку из файла
+ * XLib
+ *
+ * Нарисовать в Pixmap картинку из файла
  * x - позиция по горизонтали
  * y - позиция по вертекали
+ * fileName - файл с данными картинки в текстовом виде
  * n - размер массива по y (количество строк в файле)
  * m - размер массива по x (количество столбцов в файле)
+ *
+ * return - pixmap с картинкой
  */
-void drawImage(int x, int y, const char *fileName, int n, int m) {
-	int k=m+1;
-	char *b = new char[n*k];
+ void getImage(const char *fileName, int n, int m, Pixmap pixmap) {
+	int k = m + 1;
+	char *b = new char[n * k];
 	if (readMapFromFile(fileName, b, n, k)) {
-		drawSprite(x, y, n, m, b);
+		drawSprite(n, m, b, pixmap);
 	}
 	delete b;
 }
 
+
+ /**
+  * XLib
+  *
+  * Нарисовать только 1 объект с карты
+  * i - строка в массиве карты
+  * j - столбец в массиве карты
+  */
+ void draw(int i, int j) {
+     char val = map[i][j] ;
+     int y=i*8;
+     int x=j*8;
+
+     if (val == PACMAN) {
+         if (pacmanSprite == 1) {
+             pacmanSprite = 2;
+             if (dx < 0) {
+                 XCopyArea(display, pixmaps[5], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dx > 0) {
+                 XCopyArea(display, pixmaps[7], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dy < 0) {
+                 XCopyArea(display, pixmaps[9], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dy > 0) {
+                 XCopyArea(display, pixmaps[11], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else {
+                 XCopyArea(display, pixmaps[4], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             }
+         } else if (pacmanSprite == 2) {
+             pacmanSprite = 3;
+             if (dx < 0) {
+            	 XCopyArea(display, pixmaps[6], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dx > 0) {
+            	 XCopyArea(display, pixmaps[8], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dy < 0) {
+                 XCopyArea(display, pixmaps[10], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dy > 0) {
+            	 XCopyArea(display, pixmaps[12], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else {
+            	 XCopyArea(display, pixmaps[4], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             }
+         } else if (pacmanSprite == 3) {
+             pacmanSprite = 1;
+             XCopyArea(display, pixmaps[4], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+         }
+     } else if (val == RED) {
+         if (redSprite == 1) {
+             redSprite = 2;
+             if (dxRed < 0) {
+             	XCopyArea(display, pixmaps[13], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dxRed > 0) {
+             	XCopyArea(display, pixmaps[15], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dyRed > 0) {
+             	XCopyArea(display, pixmaps[17], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else {
+            	 XCopyArea(display, pixmaps[19], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             }
+         } else {
+             redSprite = 1;
+             if (dxRed < 0) {
+             	XCopyArea(display, pixmaps[14], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dxRed > 0) {
+             	XCopyArea(display, pixmaps[16], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dyRed > 0) {
+             	XCopyArea(display, pixmaps[18], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else {
+             	XCopyArea(display, pixmaps[20], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             }
+         }
+     } else if (val == PACGIRL) {
+         if (pacGirlSprite == 1) {
+         	pacGirlSprite = 2;
+             if (dxPacGirl < 0) {
+             	XCopyArea(display, pixmaps[25], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dxPacGirl > 0) {
+             	XCopyArea(display, pixmaps[27], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dyPacGirl < 0) {
+            	XCopyArea(display, pixmaps[29], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dyPacGirl > 0) {
+             	XCopyArea(display, pixmaps[31], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else {
+             	XCopyArea(display, pixmaps[24], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             }
+         } else if (pacGirlSprite == 2) {
+         	pacGirlSprite = 3;
+             if (dxPacGirl < 0) {
+             	XCopyArea(display, pixmaps[26], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dxPacGirl > 0) {
+             	XCopyArea(display, pixmaps[28], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dyPacGirl < 0) {
+             	XCopyArea(display, pixmaps[30], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else if (dyPacGirl > 0) {
+             	XCopyArea(display, pixmaps[32], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             } else {
+            	XCopyArea(display, pixmaps[24], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+             }
+         } else if (pacGirlSprite == 3) {
+         	pacGirlSprite = 1;
+ 			if (dxPacGirl != 0) {
+ 				XCopyArea(display, pixmaps[24], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+ 			} else {
+ 				XCopyArea(display, pixmaps[33], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+ 			}
+         }
+     } else if (val == SHADOW) {
+         if (redSprite == 1) {
+             redSprite = 2;
+             XCopyArea(display, pixmaps[21], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+         } else {
+             redSprite = 1;
+             XCopyArea(display, pixmaps[22], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+         }
+     } else if (val == FOOD) {
+     	XCopyArea(display, pixmaps[1], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+     } else if (val == EMPTY) {
+    	XCopyArea(display, pixmaps[2], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+     } else if (val == POWER_FOOD) {
+     	XCopyArea(display, pixmaps[3], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+     } else if (val == CHERRY) {
+    	XCopyArea(display, pixmaps[0], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+     } else if (val == DOOR) {
+     	XCopyArea(display, pixmaps[23], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+     }
+ }
+
+
 /**
  * DOS
  *
- * Прочитать спрайт из текстового файла
- * Нарисовать загруженную картинку
- * fileName - имя файла содержащего картинку в текстовом виде
- * sx - координата x (левый верхний угол спрайта) где будет отрисован спрайт для загрузки затем в память
- * sy - координата y (левый верхний угол спрайта) где будет отрисован спрайт для загрузки затем в память
- * n - количество строк в файле
- * m - количество столбцов в файле
- * return - картика содержащая спрайт из указанного файла
- *
- * функция так же меняет 
+ * удалить объекты спрайтов из памяти
  */
-char * getImage(int sx, int sy, const char *fileName, int n, int m) {
-	int x = sx * 8;
-	int y = sy * 8;
-	drawImage(sx, sy, fileName, n, m);
-	char *im = (char*) malloc(_imagesize(x, y, x+n, y+m));
-	_getimage(x, y, x+n-1, y+m-1, im);
-	return im;
+void freePixmaps() {
+	for (int i=0; i < IMAGES_SIZE; i++) {
+		XFreePixmap(display, pixmaps[i]);
+	}
 }
 
-/**
- * DOS
- *
- * Нарисовать только 1 объект с карты
- * i - строка в массиве карты
- * j - столбец в массиве карты
- */
-void draw(int i, int j) {
-    char val = map[i][j] ;
-    int y=i*8;
-    int x=j*8;
 
-    if (val == PACMAN) {
-        if (pacmanSprite == 1) {
-            pacmanSprite = 2;
-            if (dx < 0) {
-                _putimage(x-2, y-2, images[5], _GPSET);
-            } else if (dx > 0) {
-                _putimage(x-2, y-2, images[7], _GPSET);
-            } else if (dy < 0) {
-                _putimage(x-2, y-2, images[9], _GPSET);
-            } else if (dy > 0) {
-                _putimage(x-2, y-2, images[11], _GPSET);
-            } else {
-                _putimage(x-2, y-2, images[4], _GPSET);
-            }
-        } else if (pacmanSprite == 2) {
-            pacmanSprite = 3;
-            if (dx < 0) {
-                _putimage(x-2, y-2, images[6], _GPSET);
-            } else if (dx > 0) {
-                _putimage(x-2, y-2, images[8], _GPSET);
-            } else if (dy < 0) {
-                _putimage(x-2, y-2, images[10], _GPSET);
-            } else if (dy > 0) {
-                _putimage(x-2, y-2, images[12], _GPSET);
-            } else {
-                _putimage(x-2, y-2, images[4], _GPSET);
-            }
-        } else if (pacmanSprite == 3) {
-            pacmanSprite = 1;
-            _putimage(x-2, y-2,  images[4], _GPSET);
-        }
-    } else if (val == RED) {
-        if (redSprite == 1) {
-            redSprite = 2;
-            if (dxRed < 0) {
-            	_putimage(x-2, y-2,images[13], _GPSET);
-            } else if (dxRed > 0) {
-            	_putimage(x-2, y-2,images[15], _GPSET);
-            } else if (dyRed > 0) {
-            	_putimage(x-2, y-2,images[17], _GPSET);
-            } else {
-            	_putimage(x-2, y-2,images[19], _GPSET);
-            }
-        } else {
-            redSprite = 1;
-            if (dxRed < 0) {
-            	_putimage(x-2, y-2,images[14], _GPSET);
-            } else if (dxRed > 0) {
-            	_putimage(x-2, y-2,images[16], _GPSET);
-            } else if (dyRed > 0) {
-            	_putimage(x-2, y-2,images[18], _GPSET);
-            } else {
-            	_putimage(x-2, y-2,images[20], _GPSET);
-            }
-        }
-    } else if (val == PACGIRL) {
-        if (pacGirlSprite == 1) {
-        	pacGirlSprite = 2;
-            if (dxPacGirl < 0) {
-            	_putimage(x-2, y-2, images[25], _GPSET);
-            } else if (dxPacGirl > 0) {
-            	_putimage(x-2, y-2, images[27], _GPSET);
-            } else if (dyPacGirl < 0) {
-            	_putimage(x-2, y-2, images[29], _GPSET);
-            } else if (dyPacGirl > 0) {
-            	_putimage(x-2, y-2, images[31], _GPSET);
-            } else {
-            	_putimage(x-2, y-2, images[24], _GPSET);
-            }
-        } else if (pacGirlSprite == 2) {
-        	pacGirlSprite = 3;
-            if (dxPacGirl < 0) {
-            	_putimage(x-2, y-2, images[26], _GPSET);
-            } else if (dxPacGirl > 0) {
-            	_putimage(x-2, y-2, images[28], _GPSET);
-            } else if (dyPacGirl < 0) {
-            	_putimage(x-2, y-2, images[30], _GPSET);
-            } else if (dyPacGirl > 0) {
-            	_putimage(x-2, y-2, images[32], _GPSET);
-            } else {
-            	_putimage(x-2, y-2, images[24], _GPSET);
-            }
-        } else if (pacGirlSprite == 3) {
-        	pacGirlSprite = 1;
-			if (dxPacGirl != 0) {
-				_putimage(x-2, y-2,  images[24], _GPSET);
-			} else {
-				_putimage(x-2, y-2,  images[33], _GPSET);
-			}
-        }
-    } else if (val == SHADOW) {
-        if (redSprite == 1) {
-            redSprite = 2;
-            _putimage(x-2, y-2, images[21], _GPSET);
-        } else {
-            redSprite = 1;
-            _putimage(x-2, y-2, images[22], _GPSET);
-        }
-    } else if (val == FOOD) {
-    	_putimage(x-2, y-2, images[1], _GPSET);
-    } else if (val == EMPTY) {
-    	_putimage(x-2, y-2, images[2], _GPSET);
-    } else if (val == POWER_FOOD) {
-    	_putimage(x-2, y-2, images[3], _GPSET);
-    } else if (val == CHERRY) {
-    	_putimage(x-2, y-2, images[0], _GPSET);
-    } else if (val == DOOR) {
-    	_putimage(x-2, y-2, images[23], _GPSET);
-    }
-}
+
+// Linux !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
 /**
- * DOS
- *
- * Загрузить спрайты и нарисовать всю карту
+ * Перерисовать Карту (map[][]), PACMAN, Призраков
+ * XLib
  */
-void drawMap() {
-	// массив куда загрузим спрайты стен
-	char * walls[WALL_SIZE];
+void showMap() {
+	// создаем Графический контекст
+	gc = XCreateGC(display, window, 0, NULL);
+
+   // эта переменная будет содержать глубину цвета создаваемой
+   // пиксельной карты - количество бит, используемых для
+   // представления индекса цвета в палитре (количество цветов
+   // равно степени двойки глубины)
+   int depth = DefaultDepth(display, DefaultScreen(display));
+
 	// ключи по которым ищем загруженую в память стену
 	char wkeys[WALL_SIZE];
 
-	// координаты где будет рисоваться спрайт чтоб затем его скопировать в память
-	// после этого спрайт будет рисоваться из памяти сразу весь
-	int sx = 0;
-	int sy = 0;
-	
 	// S__.TXT содержит текстуры для персонажей и объектов что перересовываются
 	// например S10.TXT, S22.TXT
 	char t[8] = "S__.TXT";
 	// буфер для преобразования строк
 	char s[3];
-	
+
 	// загружаем изображения объектов чо могут перерисовыватся во время игры
 	for (int i=0; i < IMAGES_SIZE; i++) {
 		// имена файлов 2х значные и начинаются с S10.TXT
 		itoa(i+10, s);
-		
+
 		// заменяем '__' на цифры
 		t[1]=s[0];
 		t[2]=s[1];
-		
-		// запоминаем избражение, из файла t, размеом 14 на 14
-		images[i] = getImage(sx, sy, t, 14, 14);
-		
-		sx+=2;
-		if (sx > MAP_SIZE_X) {
-			sx = 0;
-			sy+=2;
-		}
+
+
+	   // создаем новую пиксельную карту шириной 30 и высотой в 40 пикселей
+	   pixmaps[i] = XCreatePixmap(display, window, 14, 14, depth);
+
+	   // запоминаем избражение, из файла t, размеом 14 на 14
+	   getImage(t, 14, 14, pixmaps[i]);
 	}
 
-    // переключаюсь на другую активную страницу (хотя можно просто очистить экран)
-	activePage = 1;
-	_setactivepage(activePage);
-    _setvisualpage(activePage);
-	
-	
+
 	// заполняем массив ключей нулями
 	bzero(wkeys, WALL_SIZE);
-	
-    // W_.TXT содержат текстуры картинок стен лаберинта 
+
+    // W_.TXT содержат текстуры картинок стен лаберинта
 	// например W0.TXT, WL.TXT
 	strcpy(t, "W_.TXT");
-    
+
 	// рисуем объекты карты которые не перерисовываются или перерисовыатся редко
+
 	char v;
     for (int i=0, y=0; i<MAP_SIZE_Y; i++, y=i*8) {
         for (int j=0, x=0; j<MAP_SIZE_X-1 ; j++, x=j*8) {
         	v = map[i][j];
-			if (v == FOOD) {
-				// рисуем на карте еду
-            	_putimage(x-2, y-2, images[1], _GPSET);
+			if (v == DOOR) {
+				//  ниче не делаем
+			} else if (v == FOOD) {
+				//  рисуем на карте еду
+            	XCopyArea(display, pixmaps[1], window, gc, 0, 0, 14, 14, x - 2, y - 2);
             } else if (v == POWER_FOOD) {
 				// рисуем на карте поверапы
-            	_putimage(x-2, y-2, images[3], _GPSET);
+            	XCopyArea(display, pixmaps[3], window, gc, 0, 0, 14, 14, x - 2, y - 2);
             } else if (!isNotWellOrDoor(i, j)) {
 				// рисуем на карте стены
 				// ищем загружен ли уже спрайт или надо из файла прочитать и отрисовать
 				for (int k=0; k < WALL_SIZE; k++) {
+
 					if (wkeys[k] == v) {
 						// спрайт загружен, нужно просто отрисовать
-						_putimage(x, y, walls[k], _GPSET);
-						break; 
+						XCopyArea(display, walls[k], window, gc, 0, 0, 8, 8, x, y);
+						break;
 					} else if (wkeys[k] == 0) {
 						// спрайт не загружен, нужно загрузить из файла и отрисовать
 						// запоминаем позицию куда загрузим в память спрайт
-						wkeys[k] = v;		
+						wkeys[k] = v;
 						// заменяем в "W_.TXT" символ '_' на символ прочитанный из карты
 						t[1] = v;
+
 						// ресуем избражение из файла t, в позиции j, i размером 8 на 8 и запоминаем в массив walls
-						walls[k] = getImage(j, i, t, 8, 8);
+						walls[k] = XCreatePixmap(display, window, 8, 8, depth);
+						getImage(t, 8, 8, walls[k]);
+						XCopyArea(display, walls[k], window, gc, 0, 0, 8, 8, x, y);
 						break;
 					}
+
 				}
 			}
         }
@@ -1572,31 +1241,24 @@ void drawMap() {
     draw(redY, redX);
 	draw(pacmanY, pacmanX);
 	draw(pacGirlY, pacGirlX);
-	
+
+	XFreeGC(display, gc);
+	XFlush(display);
+
 	// удаляем из памяти все стены т.к. их повторно не отрисовываем
 	for(int i=0; i < WALL_SIZE; i++) {
-		free(walls[i]);
+		XFreePixmap(display, walls[i]);
 	}
 }
 
-/** 
- * DOS 
- *
- * Перерисовать карту в графическом режиме
- */
-void draw_DOS() {
-    _setactivepage(activePage);
-    _setvisualpage(activePage);
-
-    drawMap();
-}
-
 /**
- * DOS
- *
- * обновить только поменявшиеся объекты на карте
+ * Перерисовать только нужные объекты
+ * XLib
  */
-void refresh_DOS() {
+void refreshMap() {
+	// создаем Графический контекст
+	gc = XCreateGC(display, window, 0, NULL);
+
     if (refreshCherry) {
         draw(cherryY, cherryX);
         //refreshCherry = 0;
@@ -1621,64 +1283,91 @@ void refresh_DOS() {
         draw(oldPacGirlY, oldPacGirlX);
         draw(pacGirlY, pacGirlX);
     }
-}
 
-/**
- * DOS
- *
- * текущее время в милисекундах
- */
-long current_timestamp() {
-	struct dosdate_t date;
-    struct dostime_t time;
+    char result[5];
+    char txt[20];
 
-    // получить текущую дату
-    _dos_getdate(&date);
-    // получить текущее время
-    _dos_gettime(&time);
-    // вычисляем милисекунды
-    long milliseconds = date.day * 34560000L + time.hour * 1440000L + time.minute * 60000L + time.second * 1000L + time.hsecond * 10L;
+	XSetForeground(display, gc, BlackPixel(display, 0));
+	XFillRectangle(display, window, gc, 300, 20, WIDTH, HEIGHT - 40);
 
-    return milliseconds;
-}
+    // выводим инфу о съеденных вишнях и бонусе
+    bzero(result, 5);
+    bzero(txt, 20);
 
-/**
- * DOS
- *
- * удалить объекты спрайтов из памяти
- */
-void freeImages() {
-	for(int i=0; i < IMAGES_SIZE;i++) {
-		free(images[i]);
-	}
-}
+    itoa(cherryBonus/SCORE_CHERY_BONUS, result);
+    strcat(txt, "x ");
+    strcat(txt, result);
+    strcat(txt, " = ");
+    itoa(cherryBonus, result);
+    strcat(txt, result);
 
-/**
- * END DOS END DOS END DOS END DOS END DOS END DOS END DOS END DOS  
- */
-#endif
+    XCopyArea(display, pixmaps[0], window, gc, 0, 0, 14, 14, 270, 50);
 
-/**
- * Перерисовать Карту (map[][]), PACMAN, Призраков
- */
-void showMap() {
-    #ifdef __linux__
-		draw_Linux();
-    #else
-		draw_DOS();
-    #endif
-}
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XDrawString(display, window, gc, 290, 60, txt, strlen(txt));
 
-/**
- * Перерисовать только нужные объекты
- */
-void refreshMap() {
-    #ifdef __linux__
-		// TODO рисуем все сейчас каждый раз
-		draw_Linux();
-    #else
-		refresh_DOS();
-    #endif
+
+	// выводим инфу о съеденных призраках
+    bzero(result, 5);
+    bzero(txt, 20);
+    itoa(redBonus/SCORE_RED_EAT, result);
+    strcat(txt, "x ");
+    strcat(txt, result);
+    strcat(txt, " = ");
+    itoa(redBonus, result);
+    strcat(txt, result);
+
+    XCopyArea(display, pixmaps[21], window, gc, 0, 0, 14, 14, 270, 70);
+
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XDrawString(display, window, gc, 290, 80, txt, strlen(txt));
+
+	// выводим инфу о съеденных поверапах
+    bzero(result, 5);
+    bzero(txt, 20);
+    itoa(powerBonus/SCORE_POWER_BONUS, result);
+    strcat(txt, "x ");
+    strcat(txt, result);
+    strcat(txt, " = ");
+    itoa(powerBonus + powerBonus/SCORE_POWER_BONUS, result);
+    strcat(txt, result);
+
+    XCopyArea(display, pixmaps[3], window, gc, 0, 0, 14, 14, 270, 90);
+
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XDrawString(display, window, gc, 290, 100, txt, strlen(txt));
+
+	// сколько съедено точек
+    bzero(result, 5);
+    bzero(txt, 20);
+    itoa(score - powerBonus/SCORE_POWER_BONUS, result);
+    strcat(txt, "x ");
+    strcat(txt, result);
+    strcat(txt, " = ");
+    strcat(txt, result);
+
+    bzero(result, 5);
+    itoa(foodToWIN - 4, result);
+    strcat(txt, " / ");
+    strcat(txt, result);
+
+	XCopyArea(display, pixmaps[1], window, gc, 0, 0, 14, 14, 270, 110);
+
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XDrawString(display, window, gc, 290, 120, txt, strlen(txt));
+
+	// итого
+	bzero(result, 5);
+	bzero(txt, 20);
+	itoa(score + redBonus + powerBonus + cherryBonus, result);
+	strcat(txt, "Score: ");
+	strcat(txt, result);
+
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XDrawString(display, window, gc, 300, 150, txt, strlen(txt));
+
+	XFreeGC(display, gc);
+	XFlush(display);
 }
 
 /**
@@ -1789,34 +1478,41 @@ int pacmanLooser() {
 }
 
 /**
- *  Запомнить видеорежим для DOS
+ *  Запомнить видеорежим
  */
 void videoMode() {
-    #ifdef __linux__
      //  ничего не делаем, пока в консоли работает
-    #else
-		setVideoMode_DOS();
-
-		old_apage = getGetActivePage_DOS();
-		old_vpage = getVisualPage_DOS();
-    #endif
 }
 
 /**
- * Вернуть видеорежим
+ * Отоброзить результат игры
  * выгрузить картинки из памяти
+ *
+ *  XLib
  */
-void setBackStartVideoMode(int old_apage,int old_vpage) {
-    #ifdef __linux__
-		 printf("\n");
-		 system("clear");
-		 printf("\n   Super Turbo Net Pac-Man v1.3 for Linux\n");
-    #else
-		// вернуть старый видеорежим
-		setBackStartVideoMode_DOS(old_apage, old_vpage);
-		// выгрузить из памяти спрайты
-		freeImages();
-    #endif
+void showGameResult() {
+	 // создаем Графический контекст
+	 gc = XCreateGC(display, window, 0, NULL);
+
+	 // устанавливаем белый цвет - которым будем рисовать
+	 XSetForeground(display, gc, WhitePixel(display, 0));
+	 XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
+
+	 // устанавливаем белый цвет - которым будем рисовать
+	 XSetForeground(display, gc, BlackPixel(display, 0));
+	 XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press ENTER", strlen("Press ENTER"));
+
+	 if (score >= foodToWIN) {
+		XSetForeground(display, gc, colorGreen.pixel);
+		XDrawString(display, window, gc, 290, 20, "YOU WINNER :)", strlen("YOU WINNER :)"));
+	 } else {
+		XSetForeground(display, gc, colorRed.pixel);
+		XDrawString(display, window, gc, 290, 20, "YOU LOOSER :(", strlen("YOU LOOSER :("));
+	 }
+
+	 XFreeGC(display, gc);
+	 XFlush(display);
+	 freePixmaps();
 }
 
 
@@ -1834,6 +1530,24 @@ void init() {
     redLastUpdateTime = startTime;
     pacGirlLastUpdateTime = startTime;
     redTime = startTime;
+    score = 1;
+    redBonus = 0;
+    powerBonus = 0;
+    cherryBonus = 0;
+    foodToWIN = 0;
+    redFlag = 1;
+    redTime = 0;
+    cherryFlag = 0;
+    refreshCherry = 0;
+    refreshDoor = 0;
+    oldRedVal = FOOD;
+    oldPacGirlVal = FOOD;
+    dxRed=1;
+    dyRed=0;
+    dx=0;
+    dy=0;
+    dxPacGirl=0;
+    dyPacGirl=0;
 
     // загружаем из файла карту уровня
     readMapFromFile("MAP.TXT", &map[0][0], MAP_SIZE_Y, MAP_SIZE_X);
@@ -1857,7 +1571,7 @@ void init() {
         		pacGirlY = i;
         		pacGirlX = j;
         		foodToWIN++;
-        		
+
         	    if (appType == SERVER_APPLICATION) {
         	    	score++;
         	    } else if (appType == SINGLE_APPLICATION) {
@@ -1871,8 +1585,14 @@ void init() {
         }
     }
 
-    printf("\nPress ENTER\n");
-    getchar();
+    oldX = pacmanX;
+    oldY = pacmanY;
+
+    oldPacGirlX = pacGirlX;
+    oldPacGirlY = pacGirlY;
+
+    oldXRed = redX;
+    oldYRed = redY;
 }
 
 /**
@@ -2012,11 +1732,7 @@ int redState() {
 * port - порт на катором поднимется сервер
 */
 void pacmanServer(char * port) {
-	#ifdef __linux__
-		pacmanServerLinux(port);
-	#else
-		pacmanServerDOS(port);
-	#endif
+	pacmanServerLinux(port);
 }
 
 /**
@@ -2025,11 +1741,7 @@ void pacmanServer(char * port) {
  * port - порт на катором работает сервер
  */
 void pacmanClient(char * host,  char * port) {
-	#ifdef __linux__
-		pacmanClientLinux(host, port);
-	#else
-		pacmanClientDOS(host, port);
-	#endif
+	pacmanClientLinux(host, port);
 }
 
 /**
@@ -2044,11 +1756,7 @@ void pacmanClient(char * host,  char * port) {
  * 	 шлем на сервер только нажатую на клавиатуре кнопку 2м игроком
  */
 void writeInSocket() {
-	#ifdef __linux__
-		writeInSocketLinux();
-	#else
-		writeInSocketDOS();
-	#endif
+	writeInSocketLinux();
 }
 
 /**
@@ -2058,22 +1766,14 @@ void writeInSocket() {
  * - данные об объектах и очках - для клиента
  */
 void readFromSocket() {
-	#ifdef __linux__
-		readFromSocketLinux();
-	#else
-		readFromSocketDOS();
-	#endif
+	readFromSocketLinux();
 }
 
 /**
  * Закрыть сокеты
  */
 void closeSockets() {
-	#ifdef __linux__
-		closeSocketsLinux();
-	#else
-		closeSocketsDOS();
-	#endif
+	closeSocketsLinux();
 }
 
 /**
@@ -2232,24 +1932,28 @@ void player2() {
 	readFromSocket();
 	switch (player2PressKey) {
 		// key UP
-		case 65: // Linux
+	    case 111:// XLib
+	    case 65: // Linux
 		case 72: // DOS
 			dyPacGirl = -1;
 			dxPacGirl = 0;
 			break;
 		// key DOWN
+		case 116:// XLib
 		case 66: // Linux
 		case 80: // DOS
 			dyPacGirl = 1;
 			dxPacGirl = 0;
 			break;
 		// key LEFT
+		case 113:// XLib
 		case 68: // Linux
 		case 75: // DOS
 			dxPacGirl = -1;
 			dyPacGirl = 0;
 			break;
 		// key RIGHT
+		case 114:// XLib
 		case 67: // Linux
 		case 77: // DOS
 			dxPacGirl = 1;
@@ -2268,44 +1972,52 @@ void player2() {
  * 		d - вправо
  * 		w - вверх
  */
-void player1(int ch) { 
+void player1(int ch) {
 	switch (ch) {
 	// key UP
+	case 111:// XLib
 	case 65: // Linux
 	case 72: // DOS
 		dy = -1;
 		dx = 0;
 		break;
+	case 25: // XLib
 	case 119:
 		dyPacGirl = -1;
 		dxPacGirl = 0;
 		break;
 		// key DOWN
+	case 116:// XLib
 	case 66: // Linux
 	case 80: // DOS
 		dy = 1;
 		dx = 0;
 		break;
+	case 39: // XLib
 	case 115:
 		dyPacGirl = 1;
 		dxPacGirl = 0;
 		break;
 		// key LEFT
+	case 113:// XLib
 	case 68: // Linux
 	case 75: // DOS
 		dx = -1;
 		dy = 0;
 		break;
+	case 38: // XLib
 	case 97:
 		dxPacGirl = -1;
 		dyPacGirl = 0;
 		break;
 		// key RIGHT
+	case 114:// XLib
 	case 67: // Linux
 	case 77: // DOS
 		dx = 1;
 		dy = 0;
 		break;
+	case 40: // XLib
 	case 100:
 		dxPacGirl = 1;
 		dyPacGirl = 0;
@@ -2327,11 +2039,11 @@ void refreshSingleGame() {
 			|| oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
 		// если игра сетевая, надо отправить данные о карте
 		// 2у игроку, для чего записываем данные в сокет
-		
+
 		if (appType == SERVER_APPLICATION && !connectionLost) {
 			writeInSocket();
 		}
-		
+
 		refreshMap();
 	}
 	// надо ли RED перейти в режим погони
@@ -2398,6 +2110,16 @@ void refreshClientGame() {
  *   	appType == CLIENT_APPLICATION
  */
 int gameClientMode() {
+	// событие закрытия окна
+	Atom  wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(display, window, &wmDeleteMessage, 1);
+
+	// a dealie-bob to handle KeyPress Events
+	KeySym key;
+
+	// буфер символов для KeyPress Events
+	char text[255];
+
 	// нажатая клавиша на клавиатуре
 	int ch;
 
@@ -2413,22 +2135,59 @@ int gameClientMode() {
 		// обновляем карту и все элементы какие нужно на экране
 		refreshClientGame();
 
-		if (kbhit()) {
-			// оределяем какая кнопка нажата
-			ch = getch(); // Linux getchar() ;
-			if (ch == 0) ch = getch(); // only DOS
-			player2PressKey = ch;
+		if (XPending(display) > 0) {
+			// получить очередное событие от X11
+			XNextEvent(display, &xEvent);
 
-			writeInSocket();
+			switch (xEvent.type) {
+				case Expose:
+					// Запрос на перерисовку
+					if (xEvent.xexpose.count != 0) {
+						break;
+					}
 
-			if (connectionLost) {
-				// если соединение потеряно, завершаем игру
-				return 0;
+					refreshMap();
+					break;
+
+				case KeyPress:
+					/* Выход нажатием клавиши клавиатуры */
+					if (xEvent.xkey.keycode == 9) {
+						// нажат ESC
+						return -1;
+					}
+
+					if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
+						//gc = XCreateGC(display, window, 0, NULL);
+						ch = text[0];
+					}
+					// Обработка нажатых кнопок
+					// в оденочной игре или в кооперативной с одного компьютера
+					// и на Сервере 1 игроком при сетевой игре
+					// в этом режиме можно управлять обоими персонажами
+					player2PressKey = xEvent.xkey.keycode;
+
+					writeInSocket();
+
+					if (connectionLost) {
+						// если соединение потеряно, завершаем игру
+						return 0;
+					}
+
+				break;
+
+				case ClientMessage:
+					// Нажата кнопка "Закрыть" или Alt + F4
+					if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
+						return -1;
+					}
+				break;
 			}
 		}
+
 	} while (ch != 'q');
 	return 1;
 }
+
 /**
  *  Основной цикл игры
  *  для одинойной или кооперативной игры на одном компьютере
@@ -2437,27 +2196,64 @@ int gameClientMode() {
  *   	appType == SERVER_APPLICATION
  */
 int game() {
+
+	// событие закрытия окна
+	Atom  wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(display, window, &wmDeleteMessage, 1);
+
+	// a dealie-bob to handle KeyPress Events
+	KeySym key;
+
+	// буфер символов для KeyPress Events
+	char text[255];
+
 	// нажатая клавиша на клавиатуре
 	int ch;
 	do {
 		// обновить карту / персонажей на экране
 		refreshSingleGame();
 
-		// проверяем нажата ли кнопка
-		if (kbhit()) {
+		if (XPending(display) > 0) {
+			// получить очередное событие от X11
+			XNextEvent(display, &xEvent);
 
-			// оределяем какая кнопка нажата
-			ch = getch(); // Linux getchar() ;
-			if (ch == 0) ch = getch(); // only DOS
+			switch (xEvent.type) {
+				case Expose:
+					// Запрос на перерисовку
+					if (xEvent.xexpose.count != 0) {
+						break;
+					}
 
-			// Обработка нажатых кнопок
-			// в оденочной игре или в кооперативной с одного компьютера
-			// и на Сервере 1 игроком при сетевой игре
-			// в этом режиме можно управлять обоими персонажами
-			player1(ch);
+					refreshMap();
+					break;
+
+				case KeyPress:
+					/* Выход нажатием клавиши клавиатуры */
+					if (xEvent.xkey.keycode == 9) {
+						// нажат ESC
+						return -1;
+					}
+					if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
+						//gc = XCreateGC(display, window, 0, NULL);
+						ch = text[0];
+					}
+					// Обработка нажатых кнопок
+					// в оденочной игре или в кооперативной с одного компьютера
+					// и на Сервере 1 игроком при сетевой игре
+					// в этом режиме можно управлять обоими персонажами
+					player1(xEvent.xkey.keycode);
+				break;
+
+				case ClientMessage:
+					// Нажата кнопка "Закрыть" или Alt + F4
+				    if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
+						return -1;
+				    }
+				break;
+			}
 		}
 
-		
+
 		if (appType == SERVER_APPLICATION && !connectionLost) {
 			// Если игра сетевая, нужно обработать нажатые 2м пользователем
 			// в своем клиенте кнопки сервером, для этого
@@ -2471,7 +2267,7 @@ int game() {
 		}
 
 
-		// RED 
+		// RED
 		if (!redState()) {
 			return 0;
 		}
@@ -2483,77 +2279,413 @@ int game() {
 
 	// Выход из игры 'q'
 	} while(ch != 'q');
-	
+
 	return 1;
 }
 
 
-int main(int argc, char *argv[]) {
-   printf("\nSuper Turbo NET Pac-Man v1.3\n");
-   if (argc == 2) {
-		// запущен как сервер
-	   
-	    printf("Server wait PAC-GIRL!\n");
-		pacmanServer(argv[1]);
-		if (appType == SERVER_APPLICATION) {
-			printf("Start Net GAME!\n");
-		} else {
-			printf("No Net GAME!\n");
-		}
-		
-	} else 	if (argc == 3) {
-		printf("Client\n");
-		// запущен как клиент
-		pacmanClient(argv[1], argv[2]);
-		if (appType == CLIENT_APPLICATION) {
-			printf("Start NET GAME\n");
-		} else {
-			printf("No Net GAME!\n");
-		}
+/*
+ * SetWindowManagerHints - функция, которая передает информацию о
+ * свойствах программы менеджеру окон.
+ *
+ * XLib
+ */
+static void SetWindowManagerHints(Display *display, /*Указатель на структуру Display */
+char *PClass, /*Класс программы */
+char *argv[], /*Аргументы программы */
+int argc, /*Число аргументов */
+Window window, /*Идентификатор окна */
+int x, /*Координаты левого верхнего */
+int y, /*угла окна */
+int win_wdt, /*Ширина  окна */
+int win_hgt, /*Высота окна */
+int win_wdt_min, /*Минимальная ширина окна */
+int win_hgt_min, /*Минимальная высота окна */
+char *ptrTitle, /*Заголовок окна */
+char *ptrITitle, /*Заголовок пиктограммы окна */
+Pixmap pixmap /*Рисунок пиктограммы */
+) {
+	XSizeHints size_hints; /*Рекомендации о размерах окна*/
+
+	XWMHints wm_hints;
+	XClassHint class_hint;
+	XTextProperty windowname, iconname;
+
+	if (!XStringListToTextProperty(&ptrTitle, 1, &windowname)
+			|| !XStringListToTextProperty(&ptrITitle, 1, &iconname)) {
+		puts("No memory!\n");
+		_exit(1);
 	}
 
-    srand(time(NULL));
+	size_hints.flags = PPosition | PSize | PMinSize | PMaxSize;
+	size_hints.min_width = win_wdt_min;
+	size_hints.min_height = win_hgt_min;
+	size_hints.max_height = win_hgt;
+	size_hints.max_width = win_wdt;
+	wm_hints.flags = StateHint | IconPixmapHint | InputHint;
+	wm_hints.initial_state = NormalState;
+	wm_hints.input = True;
+	wm_hints.icon_pixmap = pixmap;
+	class_hint.res_name = argv[0];
+	class_hint.res_class = PClass;
 
-    // Начальные настройки по карте
-    init();
+	XSetWMProperties(display, window, &windowname, &iconname, argv, argc,
+			&size_hints, &wm_hints, &class_hint);
+}
 
-    // запомнить видеорежим
-    videoMode();
+/**
+ *  Создание окна X window
+ *  argc - количество переданных параметров
+ *  argv - переданные параметры
+ *
+ *  return 1 - окно создано
+ *  return 0 - не удалось создать соединение с X  cthdthjv
+ */
+int xinit(int argc, char *argv[]) {
+	// Устанавливаем связь с X11 сервером
+	if ((display = XOpenDisplay(NULL)) == NULL) {
+		// не удалось создать соединение с X11 сервером
+		return 0;
+	}
 
-    // нарисовать карту и персонажей на экране
-    showMap();
+    char title[30];
+    strcpy(title, TITLE);
 
-	
-    if (appType == CLIENT_APPLICATION) {
-    	gameClientMode();
-    } else {
-    	game();
-    	// Надо обновить данные на клиенте 2го плеера
-    	
-		if (appType == SERVER_APPLICATION && !connectionLost) {
-			writeInSocket();
+    char iconTitle[8];
+    strcpy(iconTitle, ICON_TITLE);
+
+    char prgClass[8];
+    strcpy(prgClass, PRG_CLASS);
+
+	/* Получаем номер основного экрана */
+	ScreenNumber = DefaultScreen(display);
+
+	/* Создаем окно */
+	window = XCreateSimpleWindow(display, RootWindow(display, ScreenNumber),
+			 X, Y, WIDTH, HEIGHT, BORDER_WIDTH, BlackPixel(display, ScreenNumber),
+			 WhitePixel(display, ScreenNumber));
+
+	/* Задаем рекомендации для менеджера окон */
+	SetWindowManagerHints(display, prgClass, argv, argc, window, X, Y,
+			WIDTH, HEIGHT, WIDTH_MIN, HEIGHT_MIN, title, iconTitle, 0);
+
+	/* Выбираем события,  которые будет обрабатывать программа */
+	XSelectInput(display, window, ExposureMask | KeyPressMask);
+
+	/* Покажем окно */
+	XMapWindow(display, window);
+
+   // цветовая карта
+   Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+
+   XParseColor(display, colormap, "#000000", &colorBlack);
+   XAllocColor(display, colormap, &colorBlack);
+
+   XParseColor(display, colormap, "#00FF00", &colorGreen);
+   XAllocColor(display, colormap, &colorGreen);
+
+   XParseColor(display, colormap, "#FF0000", &colorRed);
+   XAllocColor(display, colormap, &colorRed);
+
+   XParseColor(display, colormap, "#0000FF", &colorBlue);
+   XAllocColor(display, colormap, &colorBlue);
+
+   XParseColor(display, colormap, "#9400D3", &colorDarkViolet);
+   XAllocColor(display, colormap, &colorDarkViolet);
+
+   XParseColor(display, colormap, "#A52A2A", &colorBrown);
+   XAllocColor(display, colormap, &colorBrown);
+
+   XParseColor(display, colormap, "#BEBEBE", &colorGray);
+   XAllocColor(display, colormap, &colorGray);
+
+   XParseColor(display, colormap, "#FFFF00", &colorYellow);
+   XAllocColor(display, colormap, &colorYellow);
+
+   XParseColor(display, colormap, "#FFFFFF", &colorWhite);
+   XAllocColor(display, colormap, &colorWhite);
+
+   return 1;
+}
+
+/**
+ * Ввод и редактирование хоста и порта для соединения с игровмм сервером
+ * или поднятие своего сервера
+ *
+ *  inputHost - хост переданный программе как параметр или от пред идущего вызова
+ *  inputPort - порт переданный программе как параметр или от пред идущего вызова
+ *
+ *  return - 0 пользователь хочет выйти из программы
+ *  return - 1 нужно запустить игру
+ */
+int inputHostPort() {
+	// событие закрытия окна
+	Atom  wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(display, window, &wmDeleteMessage, 1);
+
+	// a dealie-bob to handle KeyPress Events
+	KeySym key;
+
+	// буфер символов для KeyPress Events
+	char text[255];
+
+	// аттрибуты окна
+	XWindowAttributes window_attr;
+
+	bzero(serverHostPort, INPUT_TEXT_LENGHT);
+
+	 if (strlen(param1) > 0 && strlen(param2) > 0 && (strlen(param1) + strlen(param2)) < INPUT_TEXT_LENGHT) {
+		strcpy(serverHostPort, param1);
+		strcat(serverHostPort, " ");
+		strcat(serverHostPort, param2);
+	} else if (strlen(param1) > 0 && strlen(param2) < INPUT_TEXT_LENGHT - 1) {
+		strcpy(serverHostPort, param1);
+	}
+
+	// количество уже введенных символов
+	int word = strlen(serverHostPort);
+
+	/* Создадим цикл получения и обработки ошибок */
+	while (1) {
+		// получить очередное событие от X11
+		XNextEvent(display, &xEvent);
+
+		switch (xEvent.type) {
+			case Expose:
+				// Запрос на перерисовку
+				if (xEvent.xexpose.count != 0) {
+					break;
+				}
+
+				// создаем Графический контекст
+				gc = XCreateGC(display, window, 0, NULL);
+
+				// устанавливаем белый цвет - которым будем рисовать
+				XSetForeground(display, gc, BlackPixel(display, 0));
+
+				// выводим '"Server:'
+				XDrawString(display, window, gc, 10, INPUT_TEXT_Y, "Host+port or port: ", strlen("Host+port or port:"));
+
+				// выводим введенный хост и порт сервера
+				XDrawString(display, window, gc, 120, INPUT_TEXT_Y, serverHostPort, strlen(serverHostPort));
+
+				XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press ENTER", strlen("Press ENTER"));
+
+				XFreeGC(display, gc);
+				XFlush(display);
+				break;
+
+			case KeyPress:
+				/* Выход нажатием клавиши клавиатуры */
+				if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
+					gc = XCreateGC(display, window, 0, NULL);
+					if (xEvent.xkey.keycode == 9) {
+						// нажат ESC
+						XFreeGC(display, gc);
+
+						return 0;
+					} else if (xEvent.xkey.keycode == 36) {
+						// нажат ENTER
+
+						// устанавливаем белый цвет - которым будем рисовать
+						XSetForeground(display, gc, BlackPixel(display, 0));
+						// стираем все что было введино
+						XFillRectangle(display, window, gc, 0, 0, WIDTH, HEIGHT - 20);
+
+
+						// устанавливаем белый цвет - которым будем рисовать
+						XSetForeground(display, gc, WhitePixel(display, 0));
+						XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
+
+						bzero(param1, INPUT_TEXT_LENGHT);
+						bzero(param2, INPUT_TEXT_LENGHT);
+						if (strlen(serverHostPort) > 0) {
+							// парсим что введено пользователем
+							int j = INPUT_TEXT_LENGHT;
+							for (int i=0; i < INPUT_TEXT_LENGHT; i++) {
+								if (serverHostPort[i] == ' ') {
+									if (j == INPUT_TEXT_LENGHT) {
+										j = 0;
+
+									} else {
+										break;
+									}
+								} else if (j == INPUT_TEXT_LENGHT) {
+									param1[i] = serverHostPort[i];
+								} else {
+									param2[j] = serverHostPort[i];
+									j++;
+								}
+							}
+
+						}
+
+						// устанавливаем белый цвет - которым будем рисовать
+						XSetForeground(display, gc, BlackPixel(display, 0));
+						if (strlen(param1) > 0 && strlen(param2) > 0) {
+							XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Connecting ...", strlen("Connecting ..."));
+						} else if (strlen(param1) > 0) {
+							XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Server wait ...", strlen("Server wait ..."));
+						} else {
+							XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
+						}
+
+						XFreeGC(display, gc);
+						XFlush(display);
+						return 1;
+					} else if (xEvent.xkey.keycode == 22) {
+						// Нажат BACKSPACE
+						if (word > 0) {
+							// уменьшаем количество введенных символо
+							word--;
+
+							// стираем последний символ
+							serverHostPort[word] = 0;
+
+							// устанавливаем белый цвет - которым будем рисовать
+							XSetForeground(display, gc, WhitePixel(display, 0));
+
+							// стираем все что было введино
+							XFillRectangle(display, window, gc, 120, INPUT_TEXT_Y-10, 180, 12);
+						}
+					} else {
+						// нажато что то еще
+						if (word < INPUT_TEXT_LENGHT - 1) {
+							// добавляем к уже введенному еще символ
+							serverHostPort[word] = text[0];
+
+							// увеличиваем количество введенных символов
+							word++;
+						}
+					}
+
+					// устанавливаем черный цвет - которым будем рисовать
+					XSetForeground(display, gc, BlackPixel(display, 0));
+
+					// выводим введенное в строке Server
+					XDrawString(display, window, gc, 120, INPUT_TEXT_Y, serverHostPort, strlen(serverHostPort));
+
+					// освобождаем Графический контекст
+					XFreeGC(display, gc);
+
+					// отрисовываем все
+					XFlush(display);
+
+				}
+
+				break;
+
+			case ClientMessage:
+				// Нажата кнопка "Закрыть" или Alt + F4
+			    if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
+					return 0;
+			    }
+			}
+	}
+
+
+	return 0;
+}
+
+/** основная функция программы
+ *  argc - количество переданных параметров
+ *  argv - переданные параметры
+ */
+int main(int argc, char *argv[]) {
+	// результат игры
+	int result = 0;
+	// обнуляем массивы куда засуну параметры переданные из консоли
+	bzero(param1, INPUT_TEXT_LENGHT);
+	bzero(param2, INPUT_TEXT_LENGHT);
+
+	if (argc == 2) {
+		// порт был передан как аргумент вызова программы
+	 	strcpy(param1, argv[1]);
+	} else if (argc == 3) {
+		// хост был передан как аргумент вызова программы
+		strcpy(param1, argv[1]);
+		// порт был передан как аргумент вызова программы
+		strcpy(param2, argv[2]);
+	}
+
+	srand(time(NULL));
+
+	// Устанавливаем связь с X11 сервером
+	if (xinit(argc, argv)) {
+		while (inputHostPort()) {
+
+			gc = XCreateGC(display, window, 0, NULL);
+			// устанавливаем белый цвет - которым будем рисовать
+			XSetForeground(display, gc, WhitePixel(display, 0));
+			XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
+
+			XSetForeground(display, gc, BlackPixel(display, 0));
+			if (strlen(param1) > 0 && strlen(param2) > 0) {
+				//printf("Client\n");
+				// запущен как клиент
+				pacmanClient(param1, param2);
+
+				if (appType == CLIENT_APPLICATION) {
+					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
+				} else {
+					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
+				}
+			} else if (strlen(param1) > 0) {
+				// запущен как сервер
+				pacmanServer(param1);
+				if (appType == SERVER_APPLICATION) {
+					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
+				} else {
+					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
+				}
+			} else {
+				appType = SINGLE_APPLICATION;
+				XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
+			}
+
+			XFreeGC(display, gc);
+			XFlush(display);
+
+		    // Начальные настройки по карте
+		    init();
+
+		    // нарисовать карту и персонажей на экране
+		    showMap();
+
+		    // игра
+		    if (appType == CLIENT_APPLICATION) {
+		    	// 2 игрок за PAC-GIRL
+		    	result = gameClientMode();
+		    } else {
+		    	// 1 игрок за PAC-MAN
+		    	result = game();
+
+		    	// Надо обновить данные на клиенте 2го плеера
+				if (appType == SERVER_APPLICATION && !connectionLost) {
+					writeInSocket();
+				}
+
+		    }
+
+		    // обновить карту и персонажей на экране
+		    refreshMap();
+
+		    // отоброзить результат игры, выгрузить картинки из памяти
+		    showGameResult();
+
+		    // закрыть сокеты
+		    closeSockets();
+
+		    if (result == -1) {
+		    	break;
+		    }
 		}
-		
-    }
 
-    // обновить карту и персонажей на экране
-    refreshMap();
+		// закрываем Display X11
+		XCloseDisplay(display);
 
-    // вернуть видеорежим и вынрузить картинки из памяти для DOS
-    setBackStartVideoMode(old_apage, old_vpage);
-
-	// набранные очки 
-	printf("\nScore %d\n", score + redBonus + powerBonus + cherryBonus);
-
-    // если съеденны все FOOD и POWER_FOOD - PACMAN выиграл
-    if (score >= foodToWIN) {
-    	printf("\n YOU WINNER :)!\n");
-    } else {
-    	printf("\n YOU LOOSER :(\n");
-    }
-
-    // закрыть сокеты
-    closeSockets();
-	printf(" GAME OVER!\n \nDeveloper: BlodTor\nDisigners: Eva & Lisa\n\n\t2022\n");
-    return 0;
+	} else {
+		puts("Can not connect to the X server!\n");
+	}
+	return 0;
 }
