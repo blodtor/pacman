@@ -1,5 +1,5 @@
 /**
-Super Turbo NET Pac-Man v1.4
+Super Turbo NET Pac-Man v1.5
 порт под GNU/Linux для X сервера (это НЕ консольная версия, без Xов не будет работать!)
 на основе библиотеки XLib
 
@@ -346,7 +346,7 @@ char serverHostPort[INPUT_TEXT_LENGHT];
 #define BORDER_WIDTH 5
 
 // Заголовок окна X11
-#define TITLE "Super Turbo NET Pac-Man v1.4"
+#define TITLE "Super Turbo NET Pac-Man v1.5"
 
 // Заголовок пиктограммы окна X11
 #define ICON_TITLE "xpacman"
@@ -2164,7 +2164,19 @@ int gameClientMode() {
 					// в оденочной игре или в кооперативной с одного компьютера
 					// и на Сервере 1 игроком при сетевой игре
 					// в этом режиме можно управлять обоими персонажами
-					player2PressKey = xEvent.xkey.keycode;
+					// нужно перекодировать нажатые клавиши для совместимости с версией 1.3
+					switch (xEvent.xkey.keycode) {
+						// key UP
+						case 111: ch = 65; break;
+						// key DOWN
+						case 116: ch = 66; break;
+						// key LEFT
+						case 113: ch = 68; break;
+						// key RIGHT
+						case 114: ch = 67; break;
+					}
+
+					player2PressKey = ch;
 
 					writeInSocket();
 
