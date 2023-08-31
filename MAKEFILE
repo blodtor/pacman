@@ -1,10 +1,17 @@
-# Для сборки под DOS 
+# Для сборки из под Windows 10 версии игры для DOS, Winfows 98, Windows XP, Windows 10 
 # с помащью Open Watcom 1.9  http://www.openwatcom.org/
 # а так же понадобиться mTCP http://brutmanlabs.org/mTCP/
-# исходник надо положить в проект MTCP по пути  MTCP/APPS/PACMAN
+# исходник надо положить в проект MTCP по пути  C:/MTCP/APPS/PACMAN
 #
-# чтоб собрать надо запустить wmake
+# чтоб собрать все надо запустить: 
+# > cd C:/MTCP/APPS/PACMAN
+# > wmake
 #
+# чтоб версию под DOS:
+# > wmake pacman.exe
+#
+# чтоб версию под Windows
+#> wmake wpacman.exe 
 #
 # Possible optimizations for 8088 class processors
 #
@@ -26,7 +33,6 @@
 # -0    8088/8086 class code generation
 # -s    disable stack overflow checking
 # -zmf  put each function in a new code segment; helps with linking
-
 # Make it fast.  But don't use -oe otherwise you'll need large model.
 
 tcp_h_dir = ..\..\TCPINC\
@@ -41,10 +47,11 @@ compile_options += -i=$(tcp_h_dir) -i=$(common_h_dir)
 tcpobjs = packet.obj arp.obj eth.obj ip.obj tcp.obj tcpsockm.obj udp.obj utils.obj dns.obj timer.obj ipasm.obj trace.obj
 objs = pacman.obj
 
-all : clean pacman.exe
+all : clean pacman.exe wpacman.exe
 
 clean : .symbolic
   @del pacman.exe
+  @del wpacman.exe
   @del *.obj
   @del *.map
 
@@ -64,3 +71,6 @@ patch : .symbolic
 
 pacman.exe: $(tcpobjs) $(objs)
   wlink system dos option map option eliminate option stack=4096 name $@ file *.obj
+
+wpacman.exe:
+  wcl386 -l=nt_win ws2_32.lib -bt=nt wpacman.cpp

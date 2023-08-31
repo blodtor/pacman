@@ -1,24 +1,51 @@
 /**
  Super Turbo NET Pac-Man v1.6
- реализация Pac-Man для GNU/Linux под X11 (это НЕ консольная версия, без Xов не будет работать!)
- на основе библиотеки XLib
+ реализация Pac-Man для Windows 98, Windows XP, Windows 10
+ на основе Win32 API
 
- Из Linux собирается так:
- > make xpacman
+ Для сборки из Windows 10  нужен Open Watcom 1.9  - http://www.openwatcom.org/
+ скачать open-watcom-c-win32-1.9.exe можно тут https://sourceforge.net/projects/openwatcom/files/open-watcom-1.9/
+
+ Из Windows собирается так
+ > wmake wpacman.exe
  или
- > g++ -o xpacman xpacman.cpp -lX11
+ > wcl386 -l=nt_win wsock32.lib -bt=nt wpacman.cpp
+ или
+ > wcl386 -l=nt_win ws2_32.lib -bt=nt wpacman.cpp
 
  может соеденятся по сети с версией v1.3 (DOS версия и консольная для GNU/Linux)
 
- запустить не сетевую игру (хотя можно потом ввести порт или хост порт и играть по сети):
- > ./xpacman
- или как сервер на порту 7777 (порт можно любой)
- > ./xpacman 7777
- или как клиент который соединится с хостом localhost на порт 7777 (хост и порт любые можно)
- > ./xpacman localhost 7777
+ Из консоли можно запустить Windows версию так:
+ одиночная игра
+ > wpacman.exe
+ сетевая игра сервер (играем PAC-MAN)
+ > wpacman.exe 7777
+ сетевая игра клиент (играем PAC-GIRL)
+ > wpacman.exe localhost 7777
+
+ или 2ой клик из проводника по wpacman.exe а хост и порт можо ввести с клавиатуры для сетевой игры
+
+ Для сборки из Linux тоже нужен Open Watcom 1.9  - http://www.openwatcom.org/
+ скачать open-watcom-c-linux-1.9 можно тут https://sourceforge.net/projects/openwatcom/files/open-watcom-1.9/
+ я копирую содержимое архива в /opt/openwatcom
+
+ надо добавить в PATH путь до openwatcom/binl
+ > export WATCOM=/opt/openwatcom
+ > export PATH=$PATH:$WATCOM/binl
+
+ Из Linux собирается так
+ > make wpacman
+ или
+ > wcl386 -I/opt/openwatcom/h -I/opt/openwatcom/h/nt -l=nt_win ws2_32.lib -bt=nt wpacman.cpp
+
+ Запустить в ОС GNU/Linux версию игры для Windows можно с помащью wine так:
+ > wine wpacman.exe
+ сетевая игра сервер (играем PAC-MAN)
+ > wine wpacman.exe 7777
+ сетевая игра клиент (играем PAC-GIRL)
+ > wine wpacman.exe localhost 7777
 
  */
-
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -27,18 +54,12 @@
 #include <time.h>
 #include <errno.h>
 
-// Linux
-#include <sys/time.h>   //gettime
-#include <termios.h>
-#include <sys/types.h>  // TCP/IP
-#include <sys/socket.h> // TCP/IP
-#include <netinet/in.h> // TCP/IP
-#include <netdb.h>      // TCP/IP
+// Win32 API
+#include <windows.h>
+#include <winsock.h>
 
-// X11
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xos.h>
+// CALLBACK функция для обработки сообщений Win32 API
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 // скорость перехода pacman с одной клетки на другую в милисекундах
 const long PACMAN_SPEED = 150L;
@@ -76,12 +97,16 @@ const int SCORE_CHERY_BONUS = 200;
 const int SCORE_POWER_BONUS = 25;
 // количество очков за поедание RED
 const int SCORE_RED_EAT = 50;
+// игра не начата
+const int NO_GAME = -1;
 // не сетевая игра
 const int SINGLE_APPLICATION = 0;
 // игровой сервер 1-го игрока
 const int SERVER_APPLICATION = 1;
 // клиент 2-го игрока
 const int CLIENT_APPLICATION = 2;
+// нужно инициализировать новую игру
+const int NEED_INIT_NEW_GAME = 3;
 
 // рамер буфера для сетевого взаимдействия
 #define RECV_BUFFER_SIZE (1024)
@@ -98,7 +123,7 @@ char player2PressKey;
 // SINGLE_APPLICATION - не сетевая игра
 // SERVER_APPLICATION - игровой сервер 1-го игрока
 // CLIENT_APPLICATION - клиент 2-го игрока
-int appType = SINGLE_APPLICATION;
+int appType = NO_GAME;
 
 // значение двери (используется клиентом 2-го игрока)
 // (используется клиентом 2-го игрока при сетевом взаимодействии)
@@ -227,6 +252,17 @@ long pacGirlLastUpdateTime;
 // карта занружается из файла MAP.TXT
 char map[MAP_SIZE_Y][MAP_SIZE_X];
 
+// серверный socket - ждет подключения клиентов
+// использует только сервер
+SOCKET serverSocket;
+
+// клиентский socket
+// запустились как сервер или как клиент 2-го игрока
+// всегда в этот сокет пишем или читаем данные
+// отправить на сервер / клиент 2-го игрока
+// прочитать данные на сервере / клиенте 2-го игрока
+SOCKET clientSocket;
+
 /**
  * Пример карты
  = {
@@ -266,18 +302,7 @@ char map[MAP_SIZE_Y][MAP_SIZE_X];
  */
 #define WALL_SIZE (22)
 
-// серверный socket - ждет подключения клиентов
-// использует только сервер
-int serverSocket;
-
-// клиентский socket
-// запустились как сервер или как клиент 2-го игрока
-// всегда в этот сокет пишем или читаем данные
-// отправить на сервер / клиент 2-го игрока
-// прочитать данные на сервере / клиенте 2-го игрока
-int clientSocket;
-
-// массив куда загрузим спрайты больших объектов для X11
+// массивы куда загрузим спрайты больших объектов для Win32 Api
 /**
  * Изображение спрайтов
  *
@@ -305,14 +330,30 @@ int clientSocket;
  * 8  - желтый цвет (в DOS 14)
  * 9  - белый цвет  (в DOS 15)
  */
-Pixmap pixmaps[IMAGES_SIZE];
+HDC pixmaps[IMAGES_SIZE];
+HBITMAP hbPixmaps[IMAGES_SIZE];
+HBITMAP hmbPixmaps[IMAGES_SIZE];
 
-// массив куда загрузим спрайты стен для X11
-Pixmap walls[WALL_SIZE];
+// массивы куда загрузим спрайты стен для Win32 Api
+HDC walls[WALL_SIZE];
+HBITMAP hbWalls[WALL_SIZE];
+HBITMAP hmbWalls[WALL_SIZE];
 
-// цвета для X11
-XColor colorRed, colorGreen, colorBlue, colorBlack, colorDarkViolet, colorBrown,
-		colorGray, colorYellow, colorWhite;
+// ключи по которым ищем загруженую в память стену
+char wkeys[WALL_SIZE];
+
+// ширина окна Win32
+#define WIDTH 415
+
+// высота окна Win32
+#define HEIGHT 255
+
+// Заголовок окна Win32
+#define TITLE "Super Turbo NET Pac-Man v1.6 for Windows"
+
+// Класс программы Win32
+#define PRG_CLASS "wpacman"
+
 // максимальное   количество символов для ввода Хоста и порта для X11 окна
 #define INPUT_TEXT_LENGHT 30
 
@@ -320,58 +361,46 @@ XColor colorRed, colorGreen, colorBlue, colorBlack, colorDarkViolet, colorBrown,
 char serverHostPort[INPUT_TEXT_LENGHT];
 
 // Y координата для надписи Server и того что вводим с клавиатуры
-#define INPUT_TEXT_Y 215
-
-// Координата X левого верхнего угла окна X11
-#define X 0
-
-//Координата Y левого верхнего угла окна X11
-#define Y 0
-
-// ширина окна X11
-#define WIDTH 400
-
-// высота окна X11
-#define HEIGHT 220
-
-// минимальная ширина окна X11
-#define WIDTH_MIN 400
-
-// минимальная высота  окна X11
-#define HEIGHT_MIN 220
-
-// ширина бардюра окна X11
-#define BORDER_WIDTH 5
-
-// Заголовок окна X11
-#define TITLE "Super Turbo NET Pac-Man v1.6 for X11"
-
-// Заголовок пиктограммы окна X11
-#define ICON_TITLE "xpacman"
-
-// Класс программы X11
-#define PRG_CLASS "xpacman"
-
-// Указатель на структуру Display X11
-Display *display;
-
-// Номер экрана
-int ScreenNumber;
-
-// Графический контекст X11
-GC gc;
-
-// Событие от X11
-XEvent xEvent;
-
-// Окно X11
-Window window;
+#define INPUT_TEXT_Y 196
 
 // выбранный хост или порт если хост не задавался
 char param1[INPUT_TEXT_LENGHT];
 
 // выбранный порт
 char param2[INPUT_TEXT_LENGHT];
+
+// буфер символов для KeyPress Events
+char text[255];
+
+// количество уже введенных символов
+int word = 0;
+
+// Размеры изображения
+int IMAGE_WIDTH = 14;
+int IMAGE_HEIGHT = 14;
+
+// Позиция изображения
+int imageX = 5;
+int imageY = 5;
+
+COLORREF colorBlack = RGB(0, 0, 0);
+COLORREF colorBlue = RGB(0, 0, 255);
+COLORREF colorGreen = RGB(0, 255, 0);
+COLORREF colorRed = RGB(255, 0, 0);
+COLORREF colorViolet = RGB(255, 0, 255);
+COLORREF colorBrown = RGB(128, 64, 48);
+COLORREF colorGray = RGB(128, 128, 128);
+COLORREF colorYellow = RGB(255, 255, 0);
+COLORREF colorWhite = RGB(255, 255, 255);
+
+// необходимо выйти из игры - закрыть приложение
+int needExitFromGame = 0;
+
+// необходимо прервать текущую игру - продолжить играть не выйдет, только начать новую
+int needStopGame = 0;
+
+// нужно ли при WM_PAINT перерисовать все окно (в том числе карту)
+int refreshWindow = 1;
 
 /**
  * чтение из текстового файла массива
@@ -653,60 +682,72 @@ void parseBuffer() {
 }
 
 /**
- * Linux
+ * Win32 API
  *
  * Создание сервера
  * port - порт на катором поднимется сервер
  */
-void pacmanServerLinux(char *port) {
+void pacmanServerWindows(char *port) {
 	// порт сервера на который ждем подключение клиента
 	int serverPort;
 	// структура содержащая адрес сервера
 	struct sockaddr_in serverAddress;
 	// структура содержащая адрес клиента
 	struct sockaddr_in clientAddress;
+
 	serverPort = atoi(port);
 
-	// создаем ерверный сокет
+	// инициализация Winsock
+	WSADATA wsaData;
+	if (WSAStartup(MAKEWORD(1, 1), &wsaData) != 0) {
+		printf("\nERROR initializing Winsock");
+		return;
+	}
+
+	// создаем серверный сокет
 	serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-	if (serverSocket < 0) {
-		printf("\nERROR open socket");
+	if (serverSocket == INVALID_SOCKET) {
+		printf("\nERROR opening socket");
 	} else {
-
 		int optval = 1;
-		// SO_REUSEPORT позваляет использовать занятый порт не дожидаясь таймаута при повторной игре
-		setsockopt(serverSocket, SOL_SOCKET, SO_REUSEPORT, &optval,
-				sizeof(optval));
+		// SO_REUSEADDR позволяет использовать занятый порт не дожидаясь таймаута при повторной игре
+		setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR,
+				(const char*) &optval, sizeof(optval));
 
-		bzero((char*) &serverAddress, sizeof(serverAddress));
+		memset((char*) &serverAddress, 0, sizeof(serverAddress));
 
 		serverAddress.sin_family = AF_INET;
 		serverAddress.sin_addr.s_addr = INADDR_ANY;
 		serverAddress.sin_port = htons(serverPort);
 
-		// пробуем занять порт
+		// пробуем связать (bind) серверный сокет с адресом и портом
 		if (bind(serverSocket, (struct sockaddr*) &serverAddress,
-				sizeof(serverAddress)) < 0) {
-			printf("\nERROR bind port '%s'\n", port);
+				sizeof(serverAddress)) == SOCKET_ERROR) {
+			printf("\nERROR binding port '%s'\n", port);
 		} else {
-			// устанавливаем  serverSocket в состояние прослушивания, будет использоваться для
-			// приёма запросов входящих соединений с помощью accept()
-			// очередь ожидающих соединений  = 5
+			// устанавливаем серверный сокет в состояние прослушивания, будет использоваться для
+			// приема запросов входящих соединений с помощью accept()
+			// очередь ожидающих соединений = 5
 			if (listen(serverSocket, 5) < 0) {
 				printf("\nERROR listen\n");
 			} else {
-				socklen_t clilen = sizeof(clientAddress);
+				int clientAddressSize = sizeof(clientAddress);
 				clientSocket = accept(serverSocket,
-						(struct sockaddr*) &clientAddress, &clilen);
-				if (clientSocket < 0) {
+						(struct sockaddr*) &clientAddress, &clientAddressSize);
+				if (clientSocket == INVALID_SOCKET) {
 					printf("\nERROR accept\n");
 				} else {
-					// переводим сокет в не блокирующий режим
-					fcntl(clientSocket, F_SETFL, O_NONBLOCK);
-					// сервер поднят успешно и соеденился с клиентом 2-го игрока
-					connectionLost = 0;
-					// мы являемся сервером
-					appType = SERVER_APPLICATION;
+					// переводим сокет в неблокирующий режим
+					u_long mode = 1;
+					if (ioctlsocket(clientSocket, FIONBIO, &mode)
+							== SOCKET_ERROR) {
+						printf("\nERROR setting socket to non-blocking mode\n");
+					} else {
+						// сервер поднят успешно и соеденился с клиентом 2-го игрока
+						connectionLost = 0;
+						// мы являемся сервером
+						appType = SERVER_APPLICATION;
+					}
 				}
 			}
 		}
@@ -714,56 +755,66 @@ void pacmanServerLinux(char *port) {
 }
 
 /**
- * Linux
+ * Win32 API
  *
  * Подключение к серверу клиента 2 игрока
  * host - хост на котором работает сервер
  * port - порт на катором работает сервер
  */
-void pacmanClientLinux(char *host, char *port) {
-	//printf("Порт: '%s' Хост: '%s'\n", port, host);
-	// порт сервера на который ждем подключение клиента
+void pacmanClientWindows(char *host, char *port) {
+	// порт сервера на который ждем подключение клиента 
 	int serverPort;
-	// структура содержащая адрес сервера
+	// структура содержащая адрес сервера 
 	struct sockaddr_in serverAddress;
-	// структура содержащая адрес клиента
+	// структура содержащая адрес клиента 
 	struct sockaddr_in clientAddress;
-	// хост сервера
+	// хост сервера 
 	struct hostent *server;
 
 	serverPort = atoi(port);
 
-	// Создаем сокет для отправки сообщений
-	clientSocket = socket(AF_INET, SOCK_STREAM, 0);
-	if (clientSocket < 0) {
-		printf("\nERROR open socket\n");
+	// Инициализация библиотеки Winsock
+	WSADATA wsaData;
+	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+		printf("\nFailed to initialize Winsock.\n");
 	} else {
-		// получаем хост по имени или ip
-		server = gethostbyname(host);
-		if (server == NULL) {
-			printf("\nERROR gethostbyname\n");
+		// Создаем сокет для отправки сообщений
+		clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+		if (clientSocket == INVALID_SOCKET) {
+			printf("\nERROR open socket\n");
 		} else {
-			bzero((char*) &serverAddress, sizeof(serverAddress));
-			serverAddress.sin_family = AF_INET;
-			bcopy((char*) server->h_addr, (char *)&serverAddress.sin_addr.s_addr, server->h_length);
-			serverAddress.sin_port = htons(serverPort);
-			if (connect(clientSocket, (struct sockaddr*) &serverAddress,
-					sizeof(serverAddress)) < 0) {
-				printf("\nERROR connect\n");
+			// получаем хост по имени или ip
+			server = gethostbyname(host);
+			if (server == NULL) {
+				printf("\nERROR gethostbyname\n");
 			} else {
-				// переводим сокет в не блокирующий режим
-				fcntl(clientSocket, F_SETFL, O_NONBLOCK);
-				// клиент 2-го игрока успешно соединился с сервером
-				connectionLost = 0;
-				// мы являемся клиентом
-				appType = CLIENT_APPLICATION;
+				memset((char*) &serverAddress, 0, sizeof(serverAddress));
+				serverAddress.sin_family = AF_INET;
+				memcpy((char*) &serverAddress.sin_addr.s_addr,
+						(char*) server->h_addr, server->h_length);
+				serverAddress.sin_port = htons(serverPort);
+				if (connect(clientSocket, (struct sockaddr*) &serverAddress,
+						sizeof(serverAddress)) == SOCKET_ERROR) {
+					printf("\nERROR connect\n");
+				} else {
+					// переводим сокет в не блокирующий режим
+					unsigned long nonBlocking = 1;
+					if (ioctlsocket(clientSocket, FIONBIO, &nonBlocking) != 0) {
+						printf("\nERROR set non-blocking\n");
+					} else {
+						// клиент 2-го игрока успешно соединился с сервером
+						connectionLost = 0;
+						// мы являемся клиентом
+						appType = CLIENT_APPLICATION;
+					}
+				}
 			}
 		}
 	}
 }
 
 /**
- * Linux
+ * Win32 API
  *
  * отправляет через интерфейс сокетов сформерованный пакет
  * данные записываются в глобальный массив buffer
@@ -775,7 +826,7 @@ void pacmanClientLinux(char *host, char *port) {
  * - Отправляет на сервер данные с клиента 2-го игрока
  *   шлем на сервер только нажатую на клавиатуре кнопку 2м игроком
  */
-void writeInSocketLinux() {
+void writeInSocketWindows() {
 	// очищаем буфер
 	bzero(buffer, RECV_BUFFER_SIZE);
 
@@ -785,13 +836,13 @@ void writeInSocketLinux() {
 	int n;
 	if (appType == SERVER_APPLICATION) {
 		// записываем buffer в сокет (отправляем 2-му игроку)
-		n = write(clientSocket, buffer, RECV_BUFFER_SIZE);
+		n = send(clientSocket, (const char*) buffer, RECV_BUFFER_SIZE, 0);
 	} else {
 		// записываем buffer в сокет (отправляем на Сервер)
-		n = write(clientSocket, buffer, 1);
+		n = send(clientSocket, (const char*) buffer, 1, 0);
 	}
 
-	if (n < 0) {
+	if (n == SOCKET_ERROR) {
 		if (appType == SERVER_APPLICATION) {
 			printf("\nPac-Girl OFF\n");
 		} else {
@@ -802,12 +853,13 @@ void writeInSocketLinux() {
 }
 
 /**
- * Linux
+ * Win32 API
+ *
  * Читает данные из сокета переданные по сети
  * в глобальную переменную buffer (не пересаоздаем его всевремя)
  * а из нее потом все перекладывается в остальные  переменные (смотри parseBuffer();)
  */
-void readFromSocketLinux() {
+void readFromSocketWindows() {
 	fd_set readset;
 	FD_ZERO(&readset);
 	FD_SET(clientSocket, &readset);
@@ -818,16 +870,16 @@ void readFromSocketLinux() {
 	timeout.tv_usec = 150;
 
 	// проверяем можно ли что то прочитать из сокета
-	int n = select(clientSocket + 1, &readset, NULL, NULL, &timeout);
+	int n = select(FD_SETSIZE, &readset, NULL, NULL, &timeout);
 	if (n > 0 && FD_ISSET(clientSocket, &readset)) {
 		// очищаем буфер
 		bzero(buffer, RECV_BUFFER_SIZE);
 
-		// читоаем из сокета
+		// читаем из сокета
 		if (appType == SERVER_APPLICATION) {
-			n = read(clientSocket, buffer, 1);
+			n = recv(clientSocket, (char*) buffer, 1, 0);
 		} else {
-			n = read(clientSocket, buffer, RECV_BUFFER_SIZE);
+			n = recv(clientSocket, (char*) buffer, RECV_BUFFER_SIZE, 0);
 		}
 
 		if (n < 1) {
@@ -844,100 +896,31 @@ void readFromSocketLinux() {
 }
 
 /**
- * Linux
+ * Win32 API
  *
- * Закрыть сокеты
+ * текущее время в милисекундах
  */
-void closeSocketsLinux() {
-	if (appType == SERVER_APPLICATION) {
-		// закрываем сокеты
-		close(clientSocket);
-		close(serverSocket);
-	} else if (appType == CLIENT_APPLICATION) {
-		close(clientSocket);
-	}
-}
-
-/**
- *
- * Linux
- *
- * Нжата ли кнопка клавиатуры
- * return - 1 да, 0 нет
- */
-int kbhit(void) {
-	struct termios oldt, newt;
-	int ch;
-	int oldf;
-
-	tcgetattr(STDIN_FILENO, &oldt);
-	newt = oldt;
-	newt.c_lflag &= ~(ICANON | ECHO);
-	tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-	oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
-	fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
-
-	ch = getchar();
-
-	tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-	fcntl(STDIN_FILENO, F_SETFL, oldf);
-
-	if (ch != EOF) {
-		ungetc(ch, stdin);
-		return 1;
-	}
-
-	return 0;
-}
-
-/**
- *
- * Linux
- *
- * Какая кнопка клавиатуры нажата
- * return - код клавиши
- */
-int getch() {
-	struct termios oldattr, newattr;
-	int ch;
-	tcgetattr( STDIN_FILENO, &oldattr);
-	newattr = oldattr;
-	newattr.c_lflag &= ~( ICANON | ECHO);
-	tcsetattr( STDIN_FILENO, TCSANOW, &newattr);
-	ch = getchar();
-	tcsetattr( STDIN_FILENO, TCSANOW, &oldattr);
-	return ch;
-}
-
-/**
- * Linux
- *
- * Текущее время в милисекундах
- * printf("milliseconds: %lld\n", milliseconds); - распечатать
- *
- * return - милисекунды
- */
-long long current_timestamp() {
-	struct timeval te;
-	// получить текущее время
-	gettimeofday(&te, NULL);
-	// вычисляем милисекунды
-	long long milliseconds = te.tv_sec * 1000LL + te.tv_usec / 1000LL;
+long current_timestamp() {
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	long milliseconds = st.wDay * 86400000L + st.wHour * 3600000L
+			+ st.wMinute * 60000L + st.wSecond * 1000L + st.wMilliseconds;
 	return milliseconds;
 }
 
 /**
- * XLib
+ * Win32 API
  *
  * Нарисовать в Pixmap спрайт из буфера
- * x - позиция по горизонтали
- * y - позиция по вертекали
  * n - размер массива по y (количество строк в файле)
  * m - размер массива по x (количество столбцов в файле)
  * buff - массив с данными из текстового файла
+ * HDC - спрайт
  */
-void drawSprite(int n, int m, char *buff, Pixmap pixmap) {
+void drawSprite(int n, int m, char *buff, HDC pixmap) {
 	char txt[2];
+	COLORREF color;
+
 	for (int i = 0; i < n; i++) {
 		for (int j = 0; j < m; j++) {
 			txt[0] = buff[i * n + j + i];
@@ -946,45 +929,45 @@ void drawSprite(int n, int m, char *buff, Pixmap pixmap) {
 
 			switch (val) {
 			case 0: // черный цвет
-				XSetForeground(display, gc, colorBlack.pixel);
+				color = colorBlack;
 				break;
 			case 1: // синий цвет
-				XSetForeground(display, gc, colorBlue.pixel);
+				color = colorBlue;
 				break;
 			case 2: // зеленый цвет
-				XSetForeground(display, gc, colorGreen.pixel);
+				color = colorGreen;
 				break;
 			case 4: // красный цвет
-				XSetForeground(display, gc, colorRed.pixel);
+				color = colorRed;
 				break;
 			case 5: // пурпурный цвет
-				XSetForeground(display, gc, colorDarkViolet.pixel);
+				color = colorViolet;
 				break;
 			case 6: // коричневый цвет
-				XSetForeground(display, gc, colorBrown.pixel);
+				color = colorBrown;
 				break;
 			case 7: // серый цвет
-				XSetForeground(display, gc, colorGray.pixel);
+				color = colorGray;
 				break;
 			case 8: // желтый цвет
-				XSetForeground(display, gc, colorYellow.pixel);
+				color = colorYellow;
 				break;
 			case 9: // белый цвет
-				XSetForeground(display, gc, colorWhite.pixel);
+				color = colorWhite;
 				break;
 			default:
-				XSetForeground(display, gc, colorBlack.pixel);
+				color = colorBlack;
 			}
 
 			// рисуем точку в пикселоной карте
-			XDrawPoint(display, pixmap, gc, j, i);
+			SetPixel(pixmap, j, i, color);
 		}
 
 	}
 }
 
 /**
- * XLib
+ * Win32 API
  *
  * Нарисовать в Pixmap картинку из файла
  * x - позиция по горизонтали
@@ -995,7 +978,7 @@ void drawSprite(int n, int m, char *buff, Pixmap pixmap) {
  *
  * return - pixmap с картинкой
  */
-void getImage(const char *fileName, int n, int m, Pixmap pixmap) {
+void getImage(const char *fileName, int n, int m, HDC pixmap) {
 	int k = m + 1;
 	char *b = new char[n * k];
 	if (readMapFromFile(fileName, b, n, k)) {
@@ -1005,13 +988,13 @@ void getImage(const char *fileName, int n, int m, Pixmap pixmap) {
 }
 
 /**
- * XLib
+ * Win32 API
  *
  * Нарисовать только 1 объект с карты
  * i - строка в массиве карты
  * j - столбец в массиве карты
  */
-void draw(int i, int j) {
+void draw(int i, int j, HDC hdc) {
 	char val = map[i][j];
 	int y = i * 8;
 	int x = j * 8;
@@ -1020,194 +1003,186 @@ void draw(int i, int j) {
 		if (pacmanSprite == 1) {
 			pacmanSprite = 2;
 			if (dx < 0) {
-				XCopyArea(display, pixmaps[5], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[5], 0, 0, SRCCOPY);
 			} else if (dx > 0) {
-				XCopyArea(display, pixmaps[7], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[7], 0, 0, SRCCOPY);
 			} else if (dy < 0) {
-				XCopyArea(display, pixmaps[9], window, gc, 0, 0, 14, 14, x - 2,	y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[9], 0, 0, SRCCOPY);
 			} else if (dy > 0) {
-				XCopyArea(display, pixmaps[11], window, gc, 0, 0, 14, 14, x - 2,y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[11], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[4], window, gc, 0, 0, 14, 14, x - 2,	y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[4], 0, 0, SRCCOPY);
 			}
 		} else if (pacmanSprite == 2) {
 			pacmanSprite = 3;
 			if (dx < 0) {
-				XCopyArea(display, pixmaps[6], window, gc, 0, 0, 14, 14, x - 2,	y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[6], 0, 0, SRCCOPY);
 			} else if (dx > 0) {
-				XCopyArea(display, pixmaps[8], window, gc, 0, 0, 14, 14, x - 2,	y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[8], 0, 0, SRCCOPY);
 			} else if (dy < 0) {
-				XCopyArea(display, pixmaps[10], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[10], 0, 0, SRCCOPY);
 			} else if (dy > 0) {
-				XCopyArea(display, pixmaps[12], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[12], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[4], window, gc, 0, 0, 14, 14, x - 2,	y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[4], 0, 0, SRCCOPY);
 			}
 		} else if (pacmanSprite == 3) {
 			pacmanSprite = 1;
-			XCopyArea(display, pixmaps[4], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+			BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[4], 0, 0, SRCCOPY);
 		}
 	} else if (val == RED) {
 		if (redSprite == 1) {
 			redSprite = 2;
 			if (dxRed < 0) {
-				XCopyArea(display, pixmaps[13], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[13], 0, 0, SRCCOPY);
 			} else if (dxRed > 0) {
-				XCopyArea(display, pixmaps[15], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[15], 0, 0, SRCCOPY);
 			} else if (dyRed > 0) {
-				XCopyArea(display, pixmaps[17], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[17], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[19], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[19], 0, 0, SRCCOPY);
 			}
 		} else {
 			redSprite = 1;
 			if (dxRed < 0) {
-				XCopyArea(display, pixmaps[14], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[14], 0, 0, SRCCOPY);
 			} else if (dxRed > 0) {
-				XCopyArea(display, pixmaps[16], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[16], 0, 0, SRCCOPY);
 			} else if (dyRed > 0) {
-				XCopyArea(display, pixmaps[18], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[18], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[20], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[20], 0, 0, SRCCOPY);
 			}
 		}
 	} else if (val == PACGIRL) {
 		if (pacGirlSprite == 1) {
 			pacGirlSprite = 2;
 			if (dxPacGirl < 0) {
-				XCopyArea(display, pixmaps[25], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[25], 0, 0, SRCCOPY);
 			} else if (dxPacGirl > 0) {
-				XCopyArea(display, pixmaps[27], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[27], 0, 0, SRCCOPY);
 			} else if (dyPacGirl < 0) {
-				XCopyArea(display, pixmaps[29], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[29], 0, 0, SRCCOPY);
 			} else if (dyPacGirl > 0) {
-				XCopyArea(display, pixmaps[31], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[31], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[24], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[24], 0, 0, SRCCOPY);
 			}
 		} else if (pacGirlSprite == 2) {
 			pacGirlSprite = 3;
 			if (dxPacGirl < 0) {
-				XCopyArea(display, pixmaps[26], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[26], 0, 0, SRCCOPY);
 			} else if (dxPacGirl > 0) {
-				XCopyArea(display, pixmaps[28], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[28], 0, 0, SRCCOPY);
 			} else if (dyPacGirl < 0) {
-				XCopyArea(display, pixmaps[30], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[30], 0, 0, SRCCOPY);
 			} else if (dyPacGirl > 0) {
-				XCopyArea(display, pixmaps[32], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[32], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[24], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[24], 0, 0, SRCCOPY);
 			}
 		} else if (pacGirlSprite == 3) {
 			pacGirlSprite = 1;
 			if (dxPacGirl != 0) {
-				XCopyArea(display, pixmaps[24], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[24], 0, 0, SRCCOPY);
 			} else {
-				XCopyArea(display, pixmaps[33], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[33], 0, 0, SRCCOPY);
 			}
 		}
 	} else if (val == SHADOW) {
 		if (redSprite == 1) {
 			redSprite = 2;
-			XCopyArea(display, pixmaps[21], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+			BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[21], 0, 0, SRCCOPY);
 		} else {
 			redSprite = 1;
-			XCopyArea(display, pixmaps[22], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+			BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[22], 0, 0, SRCCOPY);
 		}
 	} else if (val == FOOD) {
-		XCopyArea(display, pixmaps[1], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+		BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[1], 0, 0, SRCCOPY);
 	} else if (val == EMPTY) {
-		XCopyArea(display, pixmaps[2], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+		BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[2], 0, 0, SRCCOPY);
 	} else if (val == POWER_FOOD) {
-		XCopyArea(display, pixmaps[3], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+		BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[3], 0, 0, SRCCOPY);
 	} else if (val == CHERRY) {
-		XCopyArea(display, pixmaps[0], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+		BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[0], 0, 0, SRCCOPY);
 	} else if (val == DOOR) {
-		XCopyArea(display, pixmaps[23], window, gc, 0, 0, 14, 14, x - 2, y - 2);
+		BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[23], 0, 0, SRCCOPY);
+	} else {
+		BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[2], 0, 0, SRCCOPY);
 	}
 }
 
 /**
- * XLib
+ * Win32 API
  *
  * удалить объекты спрайтов из памяти
  */
 void freePixmaps() {
 	for (int i = 0; i < IMAGES_SIZE; i++) {
-		XFreePixmap(display, pixmaps[i]);
+		SelectObject(pixmaps[i], hmbPixmaps[i]);
+		DeleteDC(pixmaps[i]);
+		DeleteObject(hbPixmaps[i]);
+	}
+
+	// удаляем из памяти все стены
+	for (int j = 0; j < WALL_SIZE; j++) {
+		SelectObject(walls[j], hmbWalls[j]);
+		DeleteDC(walls[j]);
+		DeleteObject(hbWalls[j]);
 	}
 }
 
-// Linux !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 /**
- * Перерисовать Карту (map[][]), PACMAN, Призраков
- * XLib
+ * Win32 API
+ *
+ * загрузить спрайты
  */
-void showMap() {
-	// создаем Графический контекст
-	gc = XCreateGC(display, window, 0, NULL);
-
-	// эта переменная будет содержать глубину цвета создаваемой
-	// пиксельной карты - количество бит, используемых для
-	// представления индекса цвета в палитре (количество цветов
-	// равно степени двойки глубины)
-	int depth = DefaultDepth(display, DefaultScreen(display));
-
-	// ключи по которым ищем загруженую в память стену
-	char wkeys[WALL_SIZE];
-
+void initPixelmap() {
+	// заполняем массив ключей нулями
+	bzero(wkeys, WALL_SIZE);
 	// S__.TXT содержит текстуры для персонажей и объектов что перересовываются
 	// например S10.TXT, S22.TXT
 	char t[8] = "S__.TXT";
 	// буфер для преобразования строк
 	char s[3];
 
+	// Получаем контекст устройства для рисования в мапе
+	HDC hdcMap;
+	hdcMap = GetDC(NULL);
 	// загружаем изображения объектов чо могут перерисовыватся во время игры
 	for (int i = 0; i < IMAGES_SIZE; i++) {
 		// имена файлов 2х значные и начинаются с S10.TXT
 		itoa(i + 10, s);
-
 		// заменяем '__' на цифры
 		t[1] = s[0];
 		t[2] = s[1];
 
-		// создаем новую пиксельную карту шириной 30 и высотой в 40 пикселей
-		pixmaps[i] = XCreatePixmap(display, window, 14, 14, depth);
+		hbPixmaps[i] = CreateCompatibleBitmap(hdcMap, 14, 14);
+		// создаем контекст устройства для работы с битмапом
+		pixmaps[i] = CreateCompatibleDC(NULL);
+		hmbPixmaps[i] = (HBITMAP) SelectObject(pixmaps[i], hbPixmaps[i]);
 
 		// запоминаем избражение, из файла t, размеом 14 на 14
 		getImage(t, 14, 14, pixmaps[i]);
-	}
 
-	// заполняем массив ключей нулями
-	bzero(wkeys, WALL_SIZE);
+	}
 
 	// W_.TXT содержат текстуры картинок стен лаберинта
 	// например W0.TXT, WL.TXT
 	strcpy(t, "W_.TXT");
 
 	// рисуем объекты карты которые не перерисовываются или перерисовыатся редко
-
 	char v;
-	for (int i = 0, y = 0; i < MAP_SIZE_Y; i++, y = i * 8) {
-		for (int j = 0, x = 0; j < MAP_SIZE_X - 1; j++, x = j * 8) {
+	for (int i = 0; i < MAP_SIZE_Y; i++) {
+		for (int j = 0; j < MAP_SIZE_X - 1; j++) {
 			v = map[i][j];
-			if (v == DOOR) {
+			if (v == DOOR || v == FOOD || v == POWER_FOOD) {
 				//  ниче не делаем
-			} else if (v == FOOD) {
-				//  рисуем на карте еду
-				XCopyArea(display, pixmaps[1], window, gc, 0, 0, 14, 14, x - 2, y - 2);
-			} else if (v == POWER_FOOD) {
-				// рисуем на карте поверапы
-				XCopyArea(display, pixmaps[3], window, gc, 0, 0, 14, 14, x - 2,	y - 2);
 			} else if (!isNotWellOrDoor(i, j)) {
-				// рисуем на карте стены
 				// ищем загружен ли уже спрайт или надо из файла прочитать и отрисовать
 				for (int k = 0; k < WALL_SIZE; k++) {
-
 					if (wkeys[k] == v) {
-						// спрайт загружен, нужно просто отрисовать
-						XCopyArea(display, walls[k], window, gc, 0, 0, 8, 8, x,	y);
+						// спрайт загружен
 						break;
 					} else if (wkeys[k] == 0) {
 						// спрайт не загружен, нужно загрузить из файла и отрисовать
@@ -1217,9 +1192,13 @@ void showMap() {
 						t[1] = v;
 
 						// ресуем избражение из файла t, в позиции j, i размером 8 на 8 и запоминаем в массив walls
-						walls[k] = XCreatePixmap(display, window, 8, 8, depth);
+						hbWalls[k] = CreateCompatibleBitmap(hdcMap, 8, 8);
+						// создаем контекст устройства для работы с битмапом
+						walls[k] = CreateCompatibleDC(NULL);
+						hmbWalls[k] = (HBITMAP) SelectObject(walls[k],
+								hbWalls[k]);
+						// запоминаем избражение, из файла t, размеом 8 на 8
 						getImage(t, 8, 8, walls[k]);
-						XCopyArea(display, walls[k], window, gc, 0, 0, 8, 8, x,	y);
 						break;
 					}
 
@@ -1228,69 +1207,117 @@ void showMap() {
 		}
 	}
 
-	draw(doorY, doorX);
-	draw(cherryY, cherryX);
-	draw(redY, redX);
-	draw(pacmanY, pacmanX);
-	draw(pacGirlY, pacGirlX);
-
-	XFreeGC(display, gc);
-	XFlush(display);
-
-	// удаляем из памяти все стены т.к. их повторно не отрисовываем
-	for (int i = 0; i < WALL_SIZE; i++) {
-		XFreePixmap(display, walls[i]);
-	}
+	ReleaseDC(NULL, hdcMap);
 }
 
 /**
- * Перерисовать только нужные объекты
- * XLib
+ * Win32 API
+ *
+ * Перерисовать Карту полностью (map[][]), PACMAN, Призраков
  */
-void refreshMap() {
-	// создаем Графический контекст
-	gc = XCreateGC(display, window, 0, NULL);
+void showMap(HDC hdc) {
+	char v;
+	for (int i = 0, y = 0; i < MAP_SIZE_Y; i++, y = i * 8) {
+		for (int j = 0, x = 0; j < MAP_SIZE_X - 1; j++, x = j * 8) {
+			v = map[i][j];
+			if (v == DOOR) {
+				//  ниче не делаем
+			} else if (v == FOOD) {
+				//  рисуем на карте еду
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[1], 0, 0,	SRCCOPY);
+			} else if (v == POWER_FOOD) {
+				// рисуем на карте поверапы
+				BitBlt(hdc, x - 2, y - 2, x + 12, y + 12, pixmaps[3], 0, 0,	SRCCOPY);
+			} else if (!isNotWellOrDoor(i, j)) {
+				// рисуем на карте стены
+				// ищем загружен ли уже спрайт или надо из файла прочитать и отрисовать
+				for (int k = 0; k < WALL_SIZE; k++) {
+					if (wkeys[k] == v) {
+						// спрайт загружен, нужно просто отрисовать
+						BitBlt(hdc, x, y, x + 8, y + 8, walls[k], 0, 0,	SRCCOPY);
+						break;
+					}
 
+				}
+			}
+		}
+	}
+
+	draw(doorY, doorX, hdc);
+	draw(cherryY, cherryX, hdc);
+	draw(redY, redX, hdc);
+	draw(pacmanY, pacmanX, hdc);
+	draw(pacGirlY, pacGirlX, hdc);
+}
+
+/**
+ * Win32 API
+ *
+ * нарисовать залитый прямоугольник
+ * x - x координата левого верхнего угла
+ * y - y координата левого верхнего угла
+ * w - x координата правого нижнего угла
+ * h - y координата правого нижнего угла
+ * COLORREF color - цвет
+ */
+void drawBox(HDC hdc, int x, int y, int w, int h, COLORREF color) {
+	// Создаем кисть для заливки изображения
+	HBRUSH hBrush = CreateSolidBrush(color);
+	// Заливаем прямоугольник красной кистью
+	RECT rect;
+	rect.left = x;
+	rect.top = y;
+	rect.right = w;
+	rect.bottom = h;
+	FillRect(hdc, &rect, hBrush);
+	// Освобождаем кисть
+	DeleteObject(hBrush);
+}
+
+/**
+ * Win32 API
+ *
+ * Перерисовать только нужные объекты
+ * 
+ */
+void refreshMap(HDC hdc) {
 	if (refreshDoor) {
-		draw(doorY, doorX);
+		draw(doorY, doorX, hdc);
 		if (map[doorY][doorX] != DOOR) {
 			refreshDoor = 0;
 		}
 	}
 
 	if (refreshCherry) {
-		draw(cherryY, cherryX);
+		draw(cherryY, cherryX, hdc);
 		if (map[cherryY][cherryX] != CHERRY) {
 			refreshCherry = 0;
 		}
 	}
 
 	if (oldXRed != redX || oldYRed != redY) {
-		draw(oldYRed, oldXRed);
-		draw(redY, redX);
+		draw(oldYRed, oldXRed, hdc);
+		draw(redY, redX, hdc);
 	}
 
 	if (oldX != pacmanX || oldY != pacmanY) {
-		draw(oldY, oldX);
-		draw(pacmanY, pacmanX);
+		draw(oldY, oldX, hdc);
+		draw(pacmanY, pacmanX, hdc);
 	}
 
 	if (oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
-		draw(oldPacGirlY, oldPacGirlX);
-		draw(pacGirlY, pacGirlX);
+		draw(oldPacGirlY, oldPacGirlX, hdc);
+		draw(pacGirlY, pacGirlX, hdc);
 	}
 
 	// TODO понять где не стираю для этой координаты
 	if (map[cherryY - 1][cherryX] != EMPTY) {
 		map[cherryY - 1][cherryX] = EMPTY;
-		draw(cherryY - 1, cherryX);
+		draw(cherryY - 1, cherryX, hdc);
 	}
 
 	char result[5];
 	char txt[20];
-
-	XSetForeground(display, gc, BlackPixel(display, 0));
-	XFillRectangle(display, window, gc, 300, 20, WIDTH, HEIGHT - 40);
 
 	// выводим инфу о съеденных вишнях и бонусе
 	bzero(result, 5);
@@ -1299,14 +1326,14 @@ void refreshMap() {
 	itoa(cherryBonus / SCORE_CHERY_BONUS, result);
 	strcat(txt, "x ");
 	strcat(txt, result);
-	strcat(txt, " = ");
+	strcat(txt, "=");
 	itoa(cherryBonus, result);
 	strcat(txt, result);
 
-	XCopyArea(display, pixmaps[0], window, gc, 0, 0, 14, 14, 270, 50);
-
-	XSetForeground(display, gc, WhitePixel(display, 0));
-	XDrawString(display, window, gc, 290, 60, txt, strlen(txt));
+	BitBlt(hdc, 270, 50, 284, 64, pixmaps[0], 0, 0, SRCCOPY);
+	SetBkColor(hdc, colorBlack);
+	SetTextColor(hdc, colorWhite);
+	TextOut(hdc, 290, 50, txt, strlen(txt));
 
 	// выводим инфу о съеденных призраках
 	bzero(result, 5);
@@ -1314,14 +1341,12 @@ void refreshMap() {
 	itoa(redBonus / SCORE_RED_EAT, result);
 	strcat(txt, "x ");
 	strcat(txt, result);
-	strcat(txt, " = ");
+	strcat(txt, "=");
 	itoa(redBonus, result);
 	strcat(txt, result);
 
-	XCopyArea(display, pixmaps[21], window, gc, 0, 0, 14, 14, 270, 70);
-
-	XSetForeground(display, gc, WhitePixel(display, 0));
-	XDrawString(display, window, gc, 290, 80, txt, strlen(txt));
+	BitBlt(hdc, 270, 70, 284, 84, pixmaps[21], 0, 0, SRCCOPY);
+	TextOut(hdc, 290, 70, txt, strlen(txt));
 
 	// выводим инфу о съеденных поверапах
 	bzero(result, 5);
@@ -1329,14 +1354,12 @@ void refreshMap() {
 	itoa(powerBonus / SCORE_POWER_BONUS, result);
 	strcat(txt, "x ");
 	strcat(txt, result);
-	strcat(txt, " = ");
+	strcat(txt, "=");
 	itoa(powerBonus + powerBonus / SCORE_POWER_BONUS, result);
 	strcat(txt, result);
 
-	XCopyArea(display, pixmaps[3], window, gc, 0, 0, 14, 14, 270, 90);
-
-	XSetForeground(display, gc, WhitePixel(display, 0));
-	XDrawString(display, window, gc, 290, 100, txt, strlen(txt));
+	BitBlt(hdc, 270, 90, 284, 104, pixmaps[3], 0, 0, SRCCOPY);
+	TextOut(hdc, 290, 90, txt, strlen(txt));
 
 	// сколько съедено точек
 	bzero(result, 5);
@@ -1344,7 +1367,7 @@ void refreshMap() {
 	itoa(score - powerBonus / SCORE_POWER_BONUS, result);
 	strcat(txt, "x ");
 	strcat(txt, result);
-	strcat(txt, " = ");
+	strcat(txt, "=");
 	strcat(txt, result);
 
 	bzero(result, 5);
@@ -1352,10 +1375,8 @@ void refreshMap() {
 	strcat(txt, " / ");
 	strcat(txt, result);
 
-	XCopyArea(display, pixmaps[1], window, gc, 0, 0, 14, 14, 270, 110);
-
-	XSetForeground(display, gc, WhitePixel(display, 0));
-	XDrawString(display, window, gc, 290, 120, txt, strlen(txt));
+	BitBlt(hdc, 270, 110, 284, 124, pixmaps[1], 0, 0, SRCCOPY);
+	TextOut(hdc, 290, 110, txt, strlen(txt));
 
 	// итого
 	bzero(result, 5);
@@ -1364,11 +1385,7 @@ void refreshMap() {
 	strcat(txt, "Score: ");
 	strcat(txt, result);
 
-	XSetForeground(display, gc, WhitePixel(display, 0));
-	XDrawString(display, window, gc, 300, 150, txt, strlen(txt));
-
-	XFreeGC(display, gc);
-	XFlush(display);
+	TextOut(hdc, 300, 150, txt, strlen(txt));
 }
 
 /**
@@ -1479,41 +1496,26 @@ int pacmanLooser() {
 }
 
 /**
- *  Запомнить видеорежим
- */
-void videoMode() {
-	//  ничего не делаем, пока в консоли работает
-}
-
-/**
  * Отоброзить результат игры
- * выгрузить картинки из памяти
  *
- *  XLib
+ *  Win32 API
  */
-void showGameResult() {
-	// создаем Графический контекст
-	gc = XCreateGC(display, window, 0, NULL);
+void showGameResult(HDC hdc) {
+	drawBox(hdc, 300, HEIGHT - 60, WIDTH, HEIGHT, colorWhite);
 
-	// устанавливаем белый цвет - которым будем рисовать
-	XSetForeground(display, gc, WhitePixel(display, 0));
-	XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
-
-	// устанавливаем белый цвет - которым будем рисовать
-	XSetForeground(display, gc, BlackPixel(display, 0));
-	XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press ENTER", strlen("Press ENTER"));
+	SetBkColor(hdc, colorWhite);
+	SetTextColor(hdc, colorBlack);
+	TextOut(hdc, 300, INPUT_TEXT_Y, "Press ENTER", strlen("Press ENTER"));
 
 	if (score >= foodToWIN) {
-		XSetForeground(display, gc, colorGreen.pixel);
-		XDrawString(display, window, gc, 290, 20, "YOU WINNER :)", strlen("YOU WINNER :)"));
+		SetBkColor(hdc, colorBlack);
+		SetTextColor(hdc, colorGreen);
+		TextOut(hdc, 290, 20, "YOU WINNER :)", strlen("YOU WINNER :)"));
 	} else {
-		XSetForeground(display, gc, colorRed.pixel);
-		XDrawString(display, window, gc, 290, 20, "YOU LOOSER :(", strlen("YOU LOOSER :("));
+		SetBkColor(hdc, colorBlack);
+		SetTextColor(hdc, colorRed);
+		TextOut(hdc, 290, 20, "YOU LOOSER :(", strlen("YOU LOOSER :("));
 	}
-
-	XFreeGC(display, gc);
-	XFlush(display);
-	freePixmaps();
 }
 
 /**
@@ -1548,6 +1550,7 @@ void init() {
 	dy = 0;
 	dxPacGirl = 0;
 	dyPacGirl = 0;
+	needStopGame = 0;
 
 	// загружаем из файла карту уровня
 	readMapFromFile("MAP.TXT", &map[0][0], MAP_SIZE_Y, MAP_SIZE_X);
@@ -1622,7 +1625,7 @@ int redState() {
 					if (redFlag && redY != pacmanY) {
 						if (isNotWellOrDoor(redY + 1, redX)
 								&& isNotWellOrDoor(redY - 1, redX)) {
-							if (abs(redY + 1 - pacmanY) < abs(redY - 1 - pacmanY)) {
+							if (abs(redY + 1 - pacmanY)	< abs(redY - 1 - pacmanY)) {
 								dyRed = 1;
 							} else {
 								dyRed = -1;
@@ -1734,7 +1737,7 @@ int redState() {
  * port - порт на катором поднимется сервер
  */
 void pacmanServer(char *port) {
-	pacmanServerLinux(port);
+	pacmanServerWindows(port);
 }
 
 /**
@@ -1743,7 +1746,7 @@ void pacmanServer(char *port) {
  * port - порт на катором работает сервер
  */
 void pacmanClient(char *host, char *port) {
-	pacmanClientLinux(host, port);
+	pacmanClientWindows(host, port);
 }
 
 /**
@@ -1758,7 +1761,7 @@ void pacmanClient(char *host, char *port) {
  * 	 шлем на сервер только нажатую на клавиатуре кнопку 2м игроком
  */
 void writeInSocket() {
-	writeInSocketLinux();
+	writeInSocketWindows();
 }
 
 /**
@@ -1768,14 +1771,15 @@ void writeInSocket() {
  * - данные об объектах и очках - для клиента
  */
 void readFromSocket() {
-	readFromSocketLinux();
+	readFromSocketWindows();
 }
 
 /**
  * Закрыть сокеты
  */
 void closeSockets() {
-	closeSocketsLinux();
+	// Освобождение ресурсов Winsock
+	WSACleanup();
 }
 
 /**
@@ -2027,13 +2031,14 @@ void player1(int ch) {
 }
 
 /**
+ * Win32 API
+ *
  * Обновить карту / персонажей, двери, черешню
  * для Серверной, Одиночной, Кооперативной игры
  */
-void refreshSingleGame() {
-	long t1 = current_timestamp();
+void refreshSingleGame(HDC hdc) {
 	if (!cherryFlag && redFlag && !cherryBonus
-			&& (t1 - startTime > CHERRY_TIME)) {
+			&& current_timestamp() - startTime > CHERRY_TIME) {
 		openDoors();
 	}
 	// надо ли перерисовать карту
@@ -2046,10 +2051,10 @@ void refreshSingleGame() {
 			writeInSocket();
 		}
 
-		refreshMap();
+		refreshMap(hdc);
 	}
 	// надо ли RED перейти в режим погони
-	if (redFlag == 0 && (t1 - redTime > RED_TIME)) {
+	if (redFlag == 0 && (current_timestamp() - redTime > RED_TIME)) {
 		redFlag = 1;
 		if (dyRed == 0 && dxRed == 0) {
 			dyRed = -1;
@@ -2067,10 +2072,12 @@ void refreshSingleGame() {
 }
 
 /**
+ * Win32 API
+ *
  * Обновить карту / персонажей, двери, черешню
  * для игры 2 игроком на клиенте с другого компьютера
  */
-void refreshClientGame() {
+void refreshClientGame(HDC hdc) {
 	map[oldY][oldX] = EMPTY;
 	map[pacmanY][pacmanX] = PACMAN;
 	if (redFlag) {
@@ -2092,7 +2099,8 @@ void refreshClientGame() {
 	map[pacGirlY][pacGirlX] = PACGIRL;
 	if (oldX != pacmanX || oldY != pacmanY || oldXRed != redX || oldYRed != redY
 			|| oldPacGirlX != pacGirlX || oldPacGirlY != pacGirlY) {
-		refreshMap();
+
+		refreshMap(hdc);
 		// запоминаем текущие координаты PACMAN
 		oldX = pacmanX;
 		oldY = pacmanY;
@@ -2106,26 +2114,34 @@ void refreshClientGame() {
 }
 
 /**
+ *  Win32 API
+ *
  *  Основной цикл игры
  *  для игры 2 игроком на клиенте с другого компьютера
  *  в сетевом режиме
  *   	appType == CLIENT_APPLICATION
  */
-int gameClientMode() {
-	// событие закрытия окна
-	Atom wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
-	XSetWMProtocols(display, window, &wmDeleteMessage, 1);
-
-	// a dealie-bob to handle KeyPress Events
-	KeySym key;
-
-	// буфер символов для KeyPress Events
-	char text[255];
-
-	// нажатая клавиша на клавиатуре
-	int ch;
-
+int gameClientMode(HDC hdc) {
+	MSG msg;
 	do {
+		// обработка сообщений
+		if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT)
+				break;
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+
+		// Нажата кнопка "ESC"
+		if (needExitFromGame) {
+			return -1;
+		}
+
+		if (connectionLost) {
+			// если соединение потеряно, завершаем игру
+			return 0;
+		}
+
 		// читаем данные о карте / персонажах с сервера
 		readFromSocket();
 
@@ -2135,145 +2151,36 @@ int gameClientMode() {
 		}
 
 		// обновляем карту и все элементы какие нужно на экране
-		refreshClientGame();
+		refreshClientGame(hdc);
 
-		if (XPending(display) > 0) {
-			// получить очередное событие от X11
-			XNextEvent(display, &xEvent);
+		// Выход из игры 'q'
+	} while (!needStopGame);
 
-			switch (xEvent.type) {
-			case Expose:
-				// Запрос на перерисовку
-				if (xEvent.xexpose.count != 0) {
-					break;
-				}
-
-				refreshMap();
-				break;
-
-			case KeyPress:
-				/* Выход нажатием клавиши клавиатуры */
-				if (xEvent.xkey.keycode == 9) {
-					// нажат ESC
-					return -1;
-				}
-
-				if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
-					//gc = XCreateGC(display, window, 0, NULL);
-					ch = text[0];
-				}
-				// Обработка нажатых кнопок
-				// в оденочной игре или в кооперативной с одного компьютера
-				// и на Сервере 1 игроком при сетевой игре
-				// в этом режиме можно управлять обоими персонажами
-				// нужно перекодировать нажатые клавиши для совместимости с версией 1.3
-				switch (xEvent.xkey.keycode) {
-				// key UP
-				case 111:
-					ch = 65;
-					break;
-					// key DOWN
-				case 116:
-					ch = 66;
-					break;
-					// key LEFT
-				case 113:
-					ch = 68;
-					break;
-					// key RIGHT
-				case 114:
-					ch = 67;
-					break;
-				}
-
-				player2PressKey = ch;
-
-				writeInSocket();
-
-				if (connectionLost) {
-					// если соединение потеряно, завершаем игру
-					return 0;
-				}
-
-				break;
-
-			case ClientMessage:
-				// Нажата кнопка "Закрыть" или Alt + F4
-				if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
-					return -1;
-				}
-				break;
-			}
-		}
-
-	} while (ch != 'q');
 	return 1;
 }
 
 /**
+ *  Win32 API
+ *
  *  Основной цикл игры
  *  для одинойной или кооперативной игры на одном компьютере
  *      appType == SINGLE_APPLICATION
  *  или 1 игроком на сервере в сетевом режиме
  *   	appType == SERVER_APPLICATION
  */
-int game() {
-
-	// событие закрытия окна
-	Atom wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
-	XSetWMProtocols(display, window, &wmDeleteMessage, 1);
-
-	// a dealie-bob to handle KeyPress Events
-	KeySym key;
-
-	// буфер символов для KeyPress Events
-	char text[255];
-
-	// нажатая клавиша на клавиатуре
-	int ch;
+int game(HDC hdc) {
+	MSG msg;
 	do {
-		// обновить карту / персонажей на экране
-		refreshSingleGame();
-
-		if (XPending(display) > 0) {
-			// получить очередное событие от X11
-			XNextEvent(display, &xEvent);
-
-			switch (xEvent.type) {
-			case Expose:
-				// Запрос на перерисовку
-				if (xEvent.xexpose.count != 0) {
-					break;
-				}
-
-				refreshMap();
+		// обработка сообщений
+		if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT)
 				break;
-
-			case KeyPress:
-				/* Выход нажатием клавиши клавиатуры */
-				if (xEvent.xkey.keycode == 9) {
-					// нажат ESC
-					return -1;
-				}
-				if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
-					//gc = XCreateGC(display, window, 0, NULL);
-					ch = text[0];
-				}
-				// Обработка нажатых кнопок
-				// в оденочной игре или в кооперативной с одного компьютера
-				// и на Сервере 1 игроком при сетевой игре
-				// в этом режиме можно управлять обоими персонажами
-				player1(xEvent.xkey.keycode);
-				break;
-
-			case ClientMessage:
-				// Нажата кнопка "Закрыть" или Alt + F4
-				if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
-					return -1;
-				}
-				break;
-			}
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
 		}
+
+		// обновить карту / персонажей на экране
+		refreshSingleGame(hdc);
 
 		if (appType == SERVER_APPLICATION && !connectionLost) {
 			// Если игра сетевая, нужно обработать нажатые 2м пользователем
@@ -2297,137 +2204,20 @@ int game() {
 			return 0;
 		}
 
+		// Нажата кнопка "ESC"
+		if (needExitFromGame) {
+			return -1;
+		}
+
 		// Выход из игры 'q'
-	} while (ch != 'q');
-
-	return 1;
-}
-
-/*
- * SetWindowManagerHints - функция, которая передает информацию о
- * свойствах программы менеджеру окон.
- *
- * XLib
- */
-static void SetWindowManagerHints(Display *display, /*Указатель на структуру Display */
-char *PClass, /*Класс программы */
-char *argv[], /*Аргументы программы */
-int argc, /*Число аргументов */
-Window window, /*Идентификатор окна */
-int x, /*Координаты левого верхнего */
-int y, /*угла окна */
-int win_wdt, /*Ширина  окна */
-int win_hgt, /*Высота окна */
-int win_wdt_min, /*Минимальная ширина окна */
-int win_hgt_min, /*Минимальная высота окна */
-char *ptrTitle, /*Заголовок окна */
-char *ptrITitle, /*Заголовок пиктограммы окна */
-Pixmap pixmap /*Рисунок пиктограммы */
-) {
-	XSizeHints size_hints; /*Рекомендации о размерах окна*/
-
-	XWMHints wm_hints;
-	XClassHint class_hint;
-	XTextProperty windowname, iconname;
-
-	if (!XStringListToTextProperty(&ptrTitle, 1, &windowname)
-			|| !XStringListToTextProperty(&ptrITitle, 1, &iconname)) {
-		puts("No memory!\n");
-		_exit(1);
-	}
-
-	size_hints.flags = PPosition | PSize | PMinSize | PMaxSize;
-	size_hints.min_width = win_wdt_min;
-	size_hints.min_height = win_hgt_min;
-	size_hints.max_height = win_hgt;
-	size_hints.max_width = win_wdt;
-	wm_hints.flags = StateHint | IconPixmapHint | InputHint;
-	wm_hints.initial_state = NormalState;
-	wm_hints.input = True;
-	wm_hints.icon_pixmap = pixmap;
-	class_hint.res_name = argv[0];
-	class_hint.res_class = PClass;
-
-	XSetWMProperties(display, window, &windowname, &iconname, argv, argc,
-			&size_hints, &wm_hints, &class_hint);
-}
-
-/**
- *  Создание окна X window
- *  argc - количество переданных параметров
- *  argv - переданные параметры
- *
- *  return 1 - окно создано
- *  return 0 - не удалось создать соединение с X  cthdthjv
- */
-int xinit(int argc, char *argv[]) {
-	// Устанавливаем связь с X11 сервером
-	if ((display = XOpenDisplay(NULL)) == NULL) {
-		// не удалось создать соединение с X11 сервером
-		return 0;
-	}
-
-	char title[37];
-	strcpy(title, TITLE);
-
-	char iconTitle[8];
-	strcpy(iconTitle, ICON_TITLE);
-
-	char prgClass[8];
-	strcpy(prgClass, PRG_CLASS);
-
-	/* Получаем номер основного экрана */
-	ScreenNumber = DefaultScreen(display);
-
-	/* Создаем окно */
-	window = XCreateSimpleWindow(display, RootWindow(display, ScreenNumber),
-	X, Y, WIDTH, HEIGHT, BORDER_WIDTH, BlackPixel(display, ScreenNumber),
-			WhitePixel(display, ScreenNumber));
-
-	/* Задаем рекомендации для менеджера окон */
-	SetWindowManagerHints(display, prgClass, argv, argc, window, X, Y,
-	WIDTH, HEIGHT, WIDTH_MIN, HEIGHT_MIN, title, iconTitle, 0);
-
-	/* Выбираем события,  которые будет обрабатывать программа */
-	XSelectInput(display, window, ExposureMask | KeyPressMask);
-
-	/* Покажем окно */
-	XMapWindow(display, window);
-
-	// цветовая карта
-	Colormap colormap = DefaultColormap(display, DefaultScreen(display));
-
-	XParseColor(display, colormap, "#000000", &colorBlack);
-	XAllocColor(display, colormap, &colorBlack);
-
-	XParseColor(display, colormap, "#00FF00", &colorGreen);
-	XAllocColor(display, colormap, &colorGreen);
-
-	XParseColor(display, colormap, "#FF0000", &colorRed);
-	XAllocColor(display, colormap, &colorRed);
-
-	XParseColor(display, colormap, "#0000FF", &colorBlue);
-	XAllocColor(display, colormap, &colorBlue);
-
-	XParseColor(display, colormap, "#9400D3", &colorDarkViolet);
-	XAllocColor(display, colormap, &colorDarkViolet);
-
-	XParseColor(display, colormap, "#A52A2A", &colorBrown);
-	XAllocColor(display, colormap, &colorBrown);
-
-	XParseColor(display, colormap, "#BEBEBE", &colorGray);
-	XAllocColor(display, colormap, &colorGray);
-
-	XParseColor(display, colormap, "#FFFF00", &colorYellow);
-	XAllocColor(display, colormap, &colorYellow);
-
-	XParseColor(display, colormap, "#FFFFFF", &colorWhite);
-	XAllocColor(display, colormap, &colorWhite);
+	} while (!needStopGame);
 
 	return 1;
 }
 
 /**
+ * Win32 API
+ *
  * Ввод и редактирование хоста и порта для соединения с игровмм сервером
  * или поднятие своего сервера
  *
@@ -2437,23 +2227,11 @@ int xinit(int argc, char *argv[]) {
  *  return - 0 пользователь хочет выйти из программы
  *  return - 1 нужно запустить игру
  */
-int inputHostPort() {
-	// событие закрытия окна
-	Atom wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
-	XSetWMProtocols(display, window, &wmDeleteMessage, 1);
-
-	// a dealie-bob to handle KeyPress Events
-	KeySym key;
-
-	// буфер символов для KeyPress Events
-	char text[255];
-
-	// аттрибуты окна
-	XWindowAttributes window_attr;
+int inputHostPort(HDC hdc) {
+	MSG msg;
 
 	bzero(serverHostPort, INPUT_TEXT_LENGHT);
-
-	if (strlen(param1) > 0&& strlen(param2) > 0 && (strlen(param1) + strlen(param2)) < INPUT_TEXT_LENGHT) {
+	if (strlen(param1) > 0 && strlen(param2) > 0 && (strlen(param1) + strlen(param2)) < INPUT_TEXT_LENGHT) {
 		strcpy(serverHostPort, param1);
 		strcat(serverHostPort, " ");
 		strcat(serverHostPort, param2);
@@ -2462,247 +2240,448 @@ int inputHostPort() {
 	}
 
 	// количество уже введенных символов
-	int word = strlen(serverHostPort);
+	word = strlen(serverHostPort);
+
+	// обновим значение в поле где лежит хост и порт
+	SetBkColor(hdc, colorWhite);
+	SetTextColor(hdc, colorBlack);
+	TextOut(hdc, 125, INPUT_TEXT_Y, serverHostPort, strlen(serverHostPort));
 
 	/* Создадим цикл получения и обработки ошибок */
-	while (1) {
-		// получить очередное событие от X11
-		XNextEvent(display, &xEvent);
-
-		switch (xEvent.type) {
-		case Expose:
-			// Запрос на перерисовку
-			if (xEvent.xexpose.count != 0) {
+	while (true) {
+		// обработка сообщений
+		if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT)
 				break;
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+
+		// Нажата кнопка "ESC"
+		if (needExitFromGame) {
+			return -1;
+		}
+
+		if (appType == NEED_INIT_NEW_GAME) {
+			// нажат ENTER
+			if (strlen(param1) > 0 && strlen(param2) > 0) {
+				TextOut(hdc, 300, INPUT_TEXT_Y, "Connecting ...", strlen("Connecting ..."));
+			} else if (strlen(param1) > 0) {
+				TextOut(hdc, 300, INPUT_TEXT_Y, "Server wait ...", strlen("Server wait ..."));
+			} else {
+				TextOut(hdc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
 			}
-
-			// создаем Графический контекст
-			gc = XCreateGC(display, window, 0, NULL);
-
-			// устанавливаем белый цвет - которым будем рисовать
-			XSetForeground(display, gc, BlackPixel(display, 0));
-
-			// выводим '"Server:'
-			XDrawString(display, window, gc, 10, INPUT_TEXT_Y, "Host+port or port:", strlen("Host+port or port:"));
-
-			// выводим введенный хост и порт сервера
-			XDrawString(display, window, gc, 120, INPUT_TEXT_Y, serverHostPort, strlen(serverHostPort));
-
-			XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press ENTER", strlen("Press ENTER"));
-
-			XFreeGC(display, gc);
-			XFlush(display);
-			break;
-
-		case KeyPress:
-			/* Выход нажатием клавиши клавиатуры */
-			if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
-				gc = XCreateGC(display, window, 0, NULL);
-				if (xEvent.xkey.keycode == 9) {
-					// нажат ESC
-					XFreeGC(display, gc);
-
-					return 0;
-				} else if (xEvent.xkey.keycode == 36) {
-					// нажат ENTER
-
-					// устанавливаем белый цвет - которым будем рисовать
-					XSetForeground(display, gc, BlackPixel(display, 0));
-					// стираем все что было введино
-					XFillRectangle(display, window, gc, 0, 0, WIDTH, HEIGHT - 20);
-
-					// устанавливаем белый цвет - которым будем рисовать
-					XSetForeground(display, gc, WhitePixel(display, 0));
-					XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
-
-					bzero(param1, INPUT_TEXT_LENGHT);
-					bzero(param2, INPUT_TEXT_LENGHT);
-					if (strlen(serverHostPort) > 0) {
-						// парсим что введено пользователем
-						int j = INPUT_TEXT_LENGHT;
-						for (int i = 0; i < INPUT_TEXT_LENGHT; i++) {
-							if (serverHostPort[i] == ' ') {
-								if (j == INPUT_TEXT_LENGHT) {
-									j = 0;
-
-								} else {
-									break;
-								}
-							} else if (j == INPUT_TEXT_LENGHT) {
-								param1[i] = serverHostPort[i];
-							} else {
-								param2[j] = serverHostPort[i];
-								j++;
-							}
-						}
-
-					}
-
-					// устанавливаем белый цвет - которым будем рисовать
-					XSetForeground(display, gc, BlackPixel(display, 0));
-					if (strlen(param1) > 0 && strlen(param2) > 0) {
-						XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Connecting ...", strlen("Connecting ..."));
-					} else if (strlen(param1) > 0) {
-						XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Server wait ...", strlen("Server wait ..."));
-					} else {
-						XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
-					}
-
-					XFreeGC(display, gc);
-					XFlush(display);
-					return 1;
-				} else if (xEvent.xkey.keycode == 22) {
-					// Нажат BACKSPACE
-					if (word > 0) {
-						// уменьшаем количество введенных символо
-						word--;
-
-						// стираем последний символ
-						serverHostPort[word] = 0;
-
-						// устанавливаем белый цвет - которым будем рисовать
-						XSetForeground(display, gc, WhitePixel(display, 0));
-
-						// стираем все что было введино
-						XFillRectangle(display, window, gc, 120, INPUT_TEXT_Y - 10, 180, 12);
-					}
-				} else {
-					// нажато что то еще
-					if (word < INPUT_TEXT_LENGHT - 1) {
-						// добавляем к уже введенному еще символ
-						serverHostPort[word] = text[0];
-
-						// увеличиваем количество введенных символов
-						word++;
-					}
-				}
-
-				// устанавливаем черный цвет - которым будем рисовать
-				XSetForeground(display, gc, BlackPixel(display, 0));
-
-				// выводим введенное в строке Server
-				XDrawString(display, window, gc, 120, INPUT_TEXT_Y, serverHostPort, strlen(serverHostPort));
-
-				// освобождаем Графический контекст
-				XFreeGC(display, gc);
-
-				// отрисовываем все
-				XFlush(display);
-
-			}
-
-			break;
-
-		case ClientMessage:
-			// Нажата кнопка "Закрыть" или Alt + F4
-			if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
-				return 0;
-			}
+			return 1;
 		}
 	}
 
 	return 0;
 }
 
-/** основная функция программы
- *  argc - количество переданных параметров
- *  argv - переданные параметры
+/**
+ * Win32 API
+ *
+ * Парсим параметы командной строки переданные приложению из консоли
+ * и представляем как стандартные argc и *argv[] 
+ *
+ * argw - ссылка куда сохраним массив параметров
+ * return - количество параметров
  */
-int main(int argc, char *argv[]) {
-	// результат игры
-	int result = 0;
-	// обнуляем массивы куда засуну параметры переданные из консоли
+int processCommandLine(wchar_t ***argw) {
+	WCHAR *cmdline;
+	wchar_t *argbuf;
+	wchar_t **args;
+	int argc_max;
+	int i, q, argc;
+	char *p = GetCommandLine();
+	int nChars = MultiByteToWideChar(CP_ACP, 0, p, -1, NULL, 0);
+	// allocate it
+	cmdline = new WCHAR[nChars];
+	MultiByteToWideChar(CP_ACP, 0, p, -1, (LPWSTR) cmdline, nChars);
+
+	i = wcslen(cmdline) + 1;
+	argbuf = (wchar_t*) malloc(sizeof(wchar_t) * i);
+	wcscpy(argbuf, cmdline);
+
+	argc = 0;
+	argc_max = 64;
+	args = (wchar_t**) malloc(sizeof(wchar_t*) * argc_max);
+	if (args == NULL) {
+		free(argbuf);
+		return (0);
+	}
+
+	// парсим commandline в argc и *argv[] формат как в нормальной программе на C/C++
+	i = 0;
+	while (argbuf[i]) {
+		while (argbuf[i] == L' ')
+			i++;
+
+		if (argbuf[i]) {
+			if ((argbuf[i] == L'\'') || (argbuf[i] == L'"')) {
+				q = argbuf[i++];
+				if (!argbuf[i])
+					break;
+			} else
+				q = 0;
+
+			args[argc++] = &argbuf[i];
+
+			if (argc >= argc_max) {
+				argc_max += 64;
+				args = (wchar_t**) realloc(args, sizeof(wchar_t*) * argc_max);
+				if (args == NULL) {
+					free(argbuf);
+					return (0);
+				}
+			}
+
+			while ((argbuf[i]) && ((q) ? (argbuf[i] != q) : (argbuf[i] != L' ')))
+				i++;
+
+			if (argbuf[i]) {
+				argbuf[i] = 0;
+				i++;
+			}
+		}
+	}
+
+	args[argc] = NULL;
+	*argw = args;
+
+	delete[] cmdline;
+	return argc;
+}
+
+/**
+ * Win32 API
+ *
+ * точка входа в программу для Win32 приложений
+ */
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+	// обнуляем массивы куда засуну параметры переданные в программу из консоли
 	bzero(param1, INPUT_TEXT_LENGHT);
 	bzero(param2, INPUT_TEXT_LENGHT);
 
+	wchar_t **argv;
+
+	// достаем параметры переданные в консоли нашей программе
+	int argc = processCommandLine(&argv);
+
 	if (argc == 2) {
 		// порт был передан как аргумент вызова программы
-		strcpy(param1, argv[1]);
+		wcstombs(param1, argv[1], wcslen(argv[1]) + 1);
 	} else if (argc == 3) {
 		// хост был передан как аргумент вызова программы
-		strcpy(param1, argv[1]);
+		wcstombs(param1, argv[1], wcslen(argv[1]) + 1);
 		// порт был передан как аргумент вызова программы
-		strcpy(param2, argv[2]);
+		wcstombs(param2, argv[2], wcslen(argv[2]) + 1);
 	}
 
-	srand(time(NULL));
+	WNDCLASSEX wcex;
+	HWND hWnd;
+	MSG msg;
 
-	// Устанавливаем связь с X11 сервером
-	if (xinit(argc, argv)) {
-		while (inputHostPort()) {
+	// Регистрация класса окна
+	wcex.cbSize = sizeof(WNDCLASSEX);
+	wcex.style = CS_HREDRAW | CS_VREDRAW;
+	wcex.lpfnWndProc = WndProc;
+	wcex.cbClsExtra = 0;
+	wcex.cbWndExtra = 0;
+	wcex.hInstance = hInstance;
+	wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
+	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+	wcex.lpszMenuName = NULL;
+	wcex.lpszClassName = PRG_CLASS;
+	wcex.hIconSm = LoadIcon(wcex.hInstance, IDI_APPLICATION);
 
-			gc = XCreateGC(display, window, 0, NULL);
-			// устанавливаем белый цвет - которым будем рисовать
-			XSetForeground(display, gc, WhitePixel(display, 0));
-			XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
+	if (!RegisterClassEx(&wcex))
+	return FALSE;
 
-			XSetForeground(display, gc, BlackPixel(display, 0));
-			if (strlen(param1) > 0 && strlen(param2) > 0) {
-				//printf("Client\n");
-				// запущен как клиент
-				pacmanClient(param1, param2);
+	// Создание окна
+	hWnd = CreateWindow(PRG_CLASS, TITLE, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, WIDTH, HEIGHT, NULL, NULL, hInstance, NULL);
 
-				if (appType == CLIENT_APPLICATION) {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
-				} else {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
-				}
-			} else if (strlen(param1) > 0) {
-				// запущен как сервер
-				pacmanServer(param1);
-				if (appType == SERVER_APPLICATION) {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
-				} else {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
-				}
-			} else {
-				appType = SINGLE_APPLICATION;
-				XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
-			}
+	if (!hWnd) {
+		return FALSE;
+	}
 
-			XFreeGC(display, gc);
-			XFlush(display);
+	ShowWindow(hWnd, nCmdShow);
+	UpdateWindow(hWnd);
 
-			// Начальные настройки по карте
-			init();
+	// результат игры
+	int result = 0;
 
-			// нарисовать карту и персонажей на экране
-			showMap();
+	HDC hdc = GetDC(hWnd);
+	while (inputHostPort(hdc)) {
+		// стираем все что было введино
+		drawBox(hdc, 0, 0, WIDTH, HEIGHT - 60, colorBlack);
+		SetBkColor(hdc, colorWhite);
+		SetTextColor(hdc, colorBlack);;
 
-			// игра
+		if (strlen(param1) > 0 && strlen(param2) > 0) {
+			// запущен как клиент
+			pacmanClient(param1, param2);
 			if (appType == CLIENT_APPLICATION) {
-				// 2 игрок за PAC-GIRL
-				result = gameClientMode();
+				TextOut(hdc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
 			} else {
-				// 1 игрок за PAC-MAN
-				result = game();
-
-				// Надо обновить данные на клиенте 2го плеера
-				if (appType == SERVER_APPLICATION && !connectionLost) {
-					writeInSocket();
-				}
-
+				TextOut(hdc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
+				appType = SINGLE_APPLICATION;
 			}
-
-			// обновить карту и персонажей на экране
-			refreshMap();
-
-			// отоброзить результат игры, выгрузить картинки из памяти
-			showGameResult();
-
-			// закрыть сокеты
-			closeSockets();
-
-			if (result == -1) {
-				break;
+		} else if (strlen(param1) > 0) {
+			// запущен как сервер
+			pacmanServer(param1);
+			if (appType == SERVER_APPLICATION) {
+				TextOut(hdc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
+			} else {
+				TextOut(hdc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
+				appType = SINGLE_APPLICATION;
 			}
+		} else {
+			appType = SINGLE_APPLICATION;
+			TextOut(hdc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
 		}
 
-		// закрываем Display X11
-		XCloseDisplay(display);
+		// Начальные настройки по карте
+		init();
 
-	} else {
-		puts("Can not connect to the X server!\n");
+		// нарисовать карту и персонажей на экране
+		showMap(hdc);
+
+		// игра
+		if (appType == CLIENT_APPLICATION) {
+			// 2 игрок за PAC-GIRL
+			result = gameClientMode(hdc);
+		} else {
+			// 1 игрок за PAC-MAN
+			result = game(hdc);
+
+			// Надо обновить данные на клиенте 2го плеера
+			if (appType == SERVER_APPLICATION && !connectionLost) {
+				writeInSocket();
+			}
+
+		}
+
+		// обновить карту и персонажей на экране
+		refreshMap(hdc);
+
+		// отоброзить результат игры, выгрузить картинки из памяти
+		showGameResult(hdc);
+
+		// закрыть сокеты
+		closeSockets();
+
+		// игра закончена
+		appType = NO_GAME;
+
+		if (result == -1) {
+			break;
+		}
 	}
+
 	return 0;
 }
+
+/**
+ * Win32 API
+ * Реализация CALLBACK функции для обработки сообщений Win32 API
+ */
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
+		LPARAM lParam) {
+	if (wParam == SC_RESTORE) {
+		// окно было восстановлно по этому нужно перерисовать все содержимое окна
+		refreshWindow = 1;
+	}
+
+	switch (message) {
+	// событие создания окна
+	case WM_CREATE:
+		// инициализируем игру
+		init();
+		// Загружаем в память спрайты
+		initPixelmap();
+		break;
+
+		// событие рисования в окне (полное или частичная перерисовка)
+	case WM_PAINT: {
+		// Получаем контекст устройства для рисования
+		PAINTSTRUCT ps;
+		HDC hdc = BeginPaint(hWnd, &ps);
+
+		if (refreshWindow) {
+			// перерисовать все надо
+			drawBox(hdc, 0, 0, WIDTH, HEIGHT - 60, colorBlack);
+			drawBox(hdc, 0, HEIGHT - 60, WIDTH, HEIGHT, colorWhite);
+			if (appType == SINGLE_APPLICATION || appType == SERVER_APPLICATION
+					|| appType == CLIENT_APPLICATION) {
+				// нарисовать карту полностью
+				showMap(hdc);
+			}
+			refreshWindow = 0;
+		}
+
+		if (appType == SINGLE_APPLICATION || appType == SERVER_APPLICATION
+				|| appType == CLIENT_APPLICATION) {
+			refreshMap(hdc);
+		}
+
+		drawBox(hdc, 125, INPUT_TEXT_Y, 290, INPUT_TEXT_Y + 18, colorWhite);
+		SetBkColor(hdc, colorWhite);
+		SetTextColor(hdc, colorBlack);
+		TextOut(hdc, 10, INPUT_TEXT_Y, "Host+port or port:",
+				lstrlen("Host+port or port:"));
+		TextOut(hdc, 125, INPUT_TEXT_Y, serverHostPort, strlen(serverHostPort));
+
+		if (appType == SINGLE_APPLICATION) {
+			TextOut(hdc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
+		} else if (appType == CLIENT_APPLICATION) {
+			TextOut(hdc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
+		} else if (appType == SERVER_APPLICATION) {
+			TextOut(hdc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
+		} else if (appType == NEED_INIT_NEW_GAME) {
+			TextOut(hdc, 300, INPUT_TEXT_Y, "Connecting ...", strlen("Connecting ..."));
+		} else {
+			TextOut(hdc, 300, INPUT_TEXT_Y, "Press ENTER", strlen("Press ENTER"));
+		}
+
+		// Заканчиваем рисование
+		EndPaint(hWnd, &ps);
+	}
+		break;
+
+		// событие нажатия кнопки клавиатуры
+	case WM_KEYDOWN: {
+		// Обрабатываем нажатие клавиши.
+		if (wParam == VK_ESCAPE) {
+			// был нажат ESC - выход из приложения
+			needExitFromGame = 1;
+		} else if (appType == SINGLE_APPLICATION
+				|| appType == SERVER_APPLICATION) {
+			// нажата кнопка во время одиночной игры или сетевой у игрока 1
+			switch (wParam) {
+			case VK_UP:
+				player1(72);
+				break;
+			case 'W':
+				player1(25);
+				break;
+			case VK_DOWN:
+				player1(80);
+				break;
+			case 'S':
+				player1(39);
+				break;
+			case VK_LEFT:
+				player1(75);
+				break;
+			case 'A':
+				player1(38);
+				break;
+			case VK_RIGHT:
+				player1(77);
+				break;
+			case 'D':
+				player1(40);
+				break;
+			case 'Q':
+				needStopGame = 1;
+				break;
+			}
+		} else if (appType == CLIENT_APPLICATION) {
+			// Обработка нажатых кнопок 2м игроком при сетевой игре
+			switch (wParam) {
+			case VK_UP:
+				player2PressKey = 65;
+				break;
+			case VK_DOWN:
+				player2PressKey = 66;
+				break;
+			case VK_LEFT:
+				player2PressKey = 68;
+				break;
+			case VK_RIGHT:
+				player2PressKey = 67;
+				break;
+			case 'Q':
+				needStopGame = 1;
+				break;
+			}
+
+			// отправляем на сервер что было нажато 2ым игроком
+			writeInSocket();
+		} else if (appType == NO_GAME) {
+			// обработка когда игра еще не начата
+			if (wParam == VK_RETURN) {
+				// нажат ENTER
+				bzero(param1, INPUT_TEXT_LENGHT);
+				bzero(param2, INPUT_TEXT_LENGHT);
+				if (strlen(serverHostPort) > 0) {
+					// парсим что введено пользователем
+					int j = INPUT_TEXT_LENGHT;
+					for (int i = 0; i < INPUT_TEXT_LENGHT; i++) {
+						if (serverHostPort[i] == ' ') {
+							if (j == INPUT_TEXT_LENGHT) {
+								j = 0;
+							} else {
+								break;
+							}
+						} else if (j == INPUT_TEXT_LENGHT) {
+							param1[i] = serverHostPort[i];
+						} else {
+							param2[j] = serverHostPort[i];
+							j++;
+						}
+					}
+				}
+				appType = NEED_INIT_NEW_GAME;
+			}
+		}
+	}
+		break;
+
+		// событие нажатия кнопки которую можно отобразить
+	case WM_CHAR:
+		if (appType == NO_GAME) {
+			// игра еще не начата, ввод хоста и порта
+			if (wParam == VK_BACK) {
+				// Нажат BACKSPACE
+				if (word > 0) {
+					// уменьшаем количество введенных символо
+					word--;
+
+					// стираем последний символ
+					serverHostPort[word] = 0;
+
+					// перересовать окно
+					InvalidateRect(hWnd, NULL, false);
+				}
+			} else if (word < INPUT_TEXT_LENGHT - 1) {
+				// Нажата любая другая кнопка кроме BACKSPACE
+
+				// добавляем к уже введенному еще символ
+				serverHostPort[word] = wParam;
+
+				// увеличиваем количество введенных символов
+				word++;
+
+				// перересовать окно
+				InvalidateRect(hWnd, NULL, false);
+			}
+		}
+		break;
+
+		// событие уничтожения окна
+	case WM_DESTROY:
+		// освобождаем ресурсы
+		freePixmaps();
+		PostQuitMessage(0);
+		break;
+
+	default:
+		return DefWindowProc(hWnd, message, wParam, lParam);
+	}
+
+	return 0;
+}
+
