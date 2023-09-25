@@ -1,5 +1,5 @@
 /**
- Super Turbo NET Pac-Man v1.6
+ Super Turbo NET Pac-Man v1.7
  реализация Pac-Man для DOS (IBM PC XT Intel 8088) и консольная версия для GNU/Linux
 
  Из Linux, консольная версия для GNU/Linux собирается так:
@@ -915,7 +915,7 @@ long long current_timestamp() {
  */
 void draw_Linux() {
 	system("clear");
-	printf("  Super Turbo Net Pac-Man 1.6\n");
+	printf("  Super Turbo Net Pac-Man 1.7\n");
 	for (int i = 0; i < MAP_SIZE_Y; i++) {
 		printf("%s\n", map[i]);
 	}
@@ -984,30 +984,22 @@ void pacmanServerDOS(char * port) {
 	uint16_t serverPort = atoi(port);
     // Все программы mTCP должны прочитать файл конфигурации mTCP, чтобы узнать, какое прерывание использует пакетный драйвер,
     // каков IP-адрес и сетевая маска, а также некоторые другие необязательные параметры.
-	//printf("\nparseEnv");
 	if (Utils::parseEnv() != 0) {
 		printf("\nERROR parseEnv\n");
 	} else {
-		//printf("-OK\n");
 	    // Инициализировать TCP/IP стек.
 	    // Первый параметр - количество создаваемых TCP сокетов.
 	    // Второй параметр - количество исходящих TCP-буферов, которые необходимо создать.
 	    // Параметры три и четыре - пользовательские обработчики Ctrl-Break и Ctrl-C.
 	    // Если функция возвращает не нуль, это говорит о том, что была ошибка, и программа должна завершиться.
 	    // Наиболее распространённой ошибкой является невозможность найти пакетный драйвер, поскольку он не был загружен или был загружен с неправильным номером прерывания.
-		//printf("\ninitStack");
 	    if (Utils::initStack(2, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlCHandler)) {
 	    	printf("\nERROR failed to initialize TCP/IP\n");
 	    } else {
-	    	//printf("-OK\n");
 	    	// создали серверный сокет
-	    	//printf("\ngetSocket");
 	    	serverSocket = TcpSocketMgr::getSocket();
-	    	//printf("-OK\n");
 	    	// пробуем занять порт
-	    	//printf("\nlisten");
 	    	serverSocket->listen(serverPort, RECV_BUFFER_SIZE);
-	    	//printf("-OK\n");
 
 	        // Ждем подключения клиента is non-blocking!
 	        while (1) {
@@ -1017,22 +1009,15 @@ void pacmanServerDOS(char * port) {
 	            break;
 	          }
 
-	          //printf("\nPACKET_PROCESS_SINGLE");
+	          // PACKET_PROCESS_SINGLE - это макрос, проверяющий наличие новых пакетов от драйвера пакетов.
+	          // Если таковые обнаружены, макрос обрабатывает эти пакеты.
 	          PACKET_PROCESS_SINGLE;
-	          //printf("-OK\n");
-
-	          //printf("\ndriveArp");
+	          // Arp::driveArp() используется для проверки ожидающих запросов ARP и повторения их при необходимости.
 	          Arp::driveArp();
-	          //printf("-OK\n");
-
-	          //printf("\ndrivePackets");
+	          // Tcp::drivePackets() используется для отправки пакетов, которые были поставлены в очередь для отправки.
 	          Tcp::drivePackets();
-	          //printf("-OK\n");
-
-	          //printf("\naccept");
 	          clientSocket = TcpSocketMgr::accept();
 	          if (clientSocket != NULL) {
-		          //printf("-OK\n");
 	        	  serverSocket->close();
 	        	  TcpSocketMgr::freeSocket(serverSocket);
 				  // сервер поднят успешно и соеденился с клиентом 2-го игрока
@@ -1067,83 +1052,62 @@ void pacmanServerDOS(char * port) {
  * port - порт на катором работает сервер
  */
 void pacmanClientDOS(char * host, char * port) {
-	// printf("Порт: '%s' Хост: '%s'\n", port, host);
 	// порт сервера на который ждем подключение клиента
 	uint16_t serverPort = atoi(port);
     // Все программы mTCP должны прочитать файл конфигурации mTCP, чтобы узнать, какое прерывание использует пакетный драйвер,
     // каков IP-адрес и сетевая маска, а также некоторые другие необязательные параметры.
-	//printf("\nparseEnv");
 	if (Utils::parseEnv() != 0) {
 		printf("\nERROR parseEnv\n");
 	} else {
-		//printf("-OK\n");
 	    // Инициализировать TCP/IP стек.
 	    // Первый параметр - количество создаваемых TCP сокетов.
 	    // Второй параметр - количество исходящих TCP-буферов, которые необходимо создать.
 	    // Параметры три и четыре - пользовательские обработчики Ctrl-Break и Ctrl-C.
 	    // Если функция возвращает не нуль, это говорит о том, что была ошибка, и программа должна завершиться.
 	    // Наиболее распространённой ошибкой является невозможность найти пакетный драйвер, поскольку он не был загружен или был загружен с неправильным номером прерывания.
-		//printf("\ninitStack");
 	    if (Utils::initStack(2, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlCHandler)) {
 	    	printf("\nERROR initialize TCP/IP\n");
 	    } else {
-	    	//printf("-OK\n");
 			// структура содержащая адрес сервера
 			IpAddr_t serverAddress;
-			//nt16_t lclPort = 2048;
 
 			// Если был задан числовой IP-адрес, первый вызов Dns::resolve разрешит его, и не придётся ждать.
 			// Иначе, нужно в цикле дождаться завершения работы DNS.
-			//printf("\nresolve");
 			int8_t rc2 = Dns::resolve(host, serverAddress, 1);
 			if (rc2 < 0) {
 				printf("\nError resolving Server\n" );
 				shutdown();
 			} else {
-				//printf("-OK\n");
 		        while (1) {
 		            if (ctrlBreakDetected) break;
 		            if (!Dns::isQueryPending()) break;
 
-		            // Цикл должен обрабатывать входящие пакеты, при необходимости повторять запросы ARP и повторять запросы DNS.
-		            //printf("\nPACKET_PROCESS_SINGLE");
+		            // PACKET_PROCESS_SINGLE - это макрос, проверяющий наличие новых пакетов от драйвера пакетов.
+		            // Если таковые обнаружены, макрос обрабатывает эти пакеты.
 		            PACKET_PROCESS_SINGLE;
-		            //printf("-OK\n");
-
-		            //printf("\ndriveArp");
+		            // Arp::driveArp() используется для проверки ожидающих запросов ARP и повторения их при необходимости.
 		            Arp::driveArp();
-		            //printf("-OK\n");
-
-		            //printf("\ndrivePackets");
+		            // Tcp::drivePackets() используется для отправки пакетов, которые были поставлены в очередь для отправки.
 		            Tcp::drivePackets();
-		            //printf("-OK\n");
 
 		            // Реализация DNS основана на UDP.
 		            // Dns::drivePendingQuery нужен потому, что пакеты UDP могут быть потеряны, и нужен способ определить, нужно ли нам повторно отправить наш DNS-запрос.
-		            //printf("\ndrivePendingQuery");
 		            Dns::drivePendingQuery();
-		            //printf("-OK\n");
 		        }
 		        // Ещё один вызов Dns::resolve вернёт окончательный результат.
-		        //printf("\nresolve2");
 		        rc2 = Dns::resolve(host, serverAddress, 0);
 		        if (rc2 < 0) {
 					printf("\nError resolving Server\n" );
 					shutdown();
 				} else {
-					//printf("-OK\n");
 			        // Выделить сокет.
 			        // mTCP владеет структурами данных сокета. Пользователь получает указатель на них.
 			        // Вызов TcpSocketMgr::getSocket() предоставляет сокет для использования.
 			        // Когда работа будет закончена, его нужно вернуть с помощью вызова TcpSocketMgr::freeSocket().
-					//printf("\ngetSocket");
 					clientSocket = TcpSocketMgr::getSocket();
-					//printf("-OK\n");
 
 			        // Установить размер приёмного буфера.
-					//printf("\nsetRecvBuffer");
 					clientSocket->setRecvBuffer(RECV_BUFFER_SIZE);
-					//printf("-OK\n");
 
 					// Выполнить неблокирующее соединение, ожидать 10 секунд перед тем, как выдать ошибку.
 					printf("\nconnect");
@@ -1304,7 +1268,7 @@ void setBackStartVideoMode_DOS(int old_apage, int old_vpage) {
     _setvisualpage(old_vpage);
     _setvideomode(_DEFAULTMODE);
 
-    printf("\n   Super Turbo Net Pac-Man v1.6 for DOS (IBM PC XT Intel 8088)\n");
+    printf("\n   Super Turbo Net Pac-Man v1.7 for DOS (IBM PC XT Intel 8088)\n");
 }
 
 /**
@@ -1843,7 +1807,7 @@ void setBackStartVideoMode(int old_apage, int old_vpage) {
 #ifdef __linux__
 	printf("\n");
 	system("clear");
-	printf("\n Super Turbo Net Pac-Man v1.6 for Linux\n");
+	printf("\n Super Turbo Net Pac-Man v1.7 for Linux\n");
 #else
 	// вернуть старый видеорежим
 	setBackStartVideoMode_DOS(old_apage, old_vpage);
@@ -2521,7 +2485,7 @@ int game() {
 }
 
 int main(int argc, char *argv[]) {
-	printf("\nSuper Turbo NET Pac-Man v1.6\n");
+	printf("\nSuper Turbo NET Pac-Man v1.7\n");
 	if (argc == 2) {
 		// запущен как сервер
 

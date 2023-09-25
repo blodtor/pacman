@@ -1,5 +1,5 @@
 /**
- Super Turbo NET Pac-Man v1.6
+ Super Turbo NET Pac-Man v1.7
  реализация Pac-Man для GNU/Linux под X11 (это НЕ консольная версия, без Xов не будет работать!)
  на основе библиотеки XLib
 
@@ -16,7 +16,6 @@
  > ./xpacman 7777
  или как клиент который соединится с хостом localhost на порт 7777 (хост и порт любые можно)
  > ./xpacman localhost 7777
-
  */
 
 #include <stdio.h>
@@ -92,7 +91,7 @@ const int CLIENT_APPLICATION = 2;
 unsigned char buffer[RECV_BUFFER_SIZE];
 
 // кнопка нажатая 2 игроком на клиенте 2-го игрока
-char player2PressKey;
+char player2PressKey = EMPTY;
 
 // тип приложения
 // SINGLE_APPLICATION - не сетевая игра
@@ -344,7 +343,7 @@ char serverHostPort[INPUT_TEXT_LENGHT];
 #define BORDER_WIDTH 5
 
 // Заголовок окна X11
-#define TITLE "Super Turbo NET Pac-Man v1.6 for X11"
+#define TITLE "Super Turbo NET Pac-Man v1.7 for X11"
 
 // Заголовок пиктограммы окна X11
 #define ICON_TITLE "xpacman"
@@ -372,6 +371,13 @@ char param1[INPUT_TEXT_LENGHT];
 
 // выбранный порт
 char param2[INPUT_TEXT_LENGHT];
+
+// получили ли уже что то от 2-го игрока по сети
+// 0 - нет данные по сети сервер не получал
+// 1 - сервер получил данные по сети от клиента
+// нужно чтоб игра на сервере начиналась после того как клиент отрисовал карту
+// тем самым сообщает что 2ой игрок готов к игре (нужно для слабых компов)
+int readFromClientSocket = 0;
 
 /**
  * чтение из текстового файла массива
@@ -839,6 +845,7 @@ void readFromSocketLinux() {
 			connectionLost = 1;
 		} else if (n > 0 && buffer[0] != 0) {
 			parseBuffer();
+			readFromClientSocket = 1;
 		}
 	}
 }
@@ -856,6 +863,7 @@ void closeSocketsLinux() {
 	} else if (appType == CLIENT_APPLICATION) {
 		close(clientSocket);
 	}
+	readFromClientSocket = 0;
 }
 
 /**
@@ -935,6 +943,7 @@ long long current_timestamp() {
  * n - размер массива по y (количество строк в файле)
  * m - размер массива по x (количество столбцов в файле)
  * buff - массив с данными из текстового файла
+ * pixmap - спрайт рисуем в пиксельную мапу (спрайт потом будем рисовать в окне из этой мапы копированием)
  */
 void drawSprite(int n, int m, char *buff, Pixmap pixmap) {
 	char txt[2];
@@ -993,7 +1002,7 @@ void drawSprite(int n, int m, char *buff, Pixmap pixmap) {
  * n - размер массива по y (количество строк в файле)
  * m - размер массива по x (количество столбцов в файле)
  *
- * return - pixmap с картинкой
+ * pixmap - сюда сохраняем картинку прочитанную из файла в байтовый массив
  */
 void getImage(const char *fileName, int n, int m, Pixmap pixmap) {
 	int k = m + 1;
@@ -1365,7 +1374,22 @@ void refreshMap() {
 	strcat(txt, result);
 
 	XSetForeground(display, gc, WhitePixel(display, 0));
+
 	XDrawString(display, window, gc, 300, 150, txt, strlen(txt));
+
+	// устанавливаем белый цвет - которым будем рисовать
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
+
+	XSetForeground(display, gc, BlackPixel(display, 0));
+
+	if (appType == CLIENT_APPLICATION) {
+		XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
+	} else if (appType == SERVER_APPLICATION) {
+		XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
+	} else {
+		XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
+	}
 
 	XFreeGC(display, gc);
 	XFlush(display);
@@ -2303,27 +2327,108 @@ int game() {
 	return 1;
 }
 
+/**
+ * Ждем подключения 2 го игрока к серверу
+ * он должен прислать чтонибуть
+ * после создания соединения и отрисовки карты
+ * нужно для медленных компов
+ */
+int waitPlayer2() {
+
+	XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Wait P2 action", strlen("Wait P2 action"));
+
+	if (appType == SERVER_APPLICATION) {
+		// событие закрытия окна
+		Atom wmDeleteMessage = XInternAtom(display, "WM_DELETE_WINDOW", False);
+		XSetWMProtocols(display, window, &wmDeleteMessage, 1);
+
+		// a dealie-bob to handle KeyPress Events
+		KeySym key;
+
+		// буфер символов для KeyPress Events
+		char text[255];
+
+		// нажатая клавиша на клавиатуре
+		int ch;
+		do {
+			if (XPending(display) > 0) {
+				// получить очередное событие от X11
+				XNextEvent(display, &xEvent);
+
+				switch (xEvent.type) {
+				case Expose:
+					// Запрос на перерисовку
+					if (xEvent.xexpose.count != 0) {
+						break;
+					}
+
+					break;
+				case KeyPress:
+					/* Выход нажатием клавиши клавиатуры */
+					if (xEvent.xkey.keycode == 9) {
+						// нажат ESC
+						return -1;
+					}
+					if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
+						//gc = XCreateGC(display, window, 0, NULL);
+						ch = text[0];
+					}
+					break;
+
+				case ClientMessage:
+					// Нажата кнопка "Закрыть" или Alt + F4
+					if (xEvent.xclient.data.l[0] == wmDeleteMessage) {
+						return -1;
+					}
+					break;
+				}
+			}
+
+			if (readFromClientSocket) {
+				break;
+			}
+
+
+			if (connectionLost) {
+				return 0;
+			}
+
+			readFromSocket();
+
+			if (readFromClientSocket) {
+				// устанавливаем белый цвет - которым будем рисовать
+				XSetForeground(display, gc, WhitePixel(display, 0));
+				XFillRectangle(display, window, gc, WIDTH - 100, HEIGHT - 20, WIDTH, HEIGHT);
+			}
+
+			// Выход из игры 'q'
+		} while (ch != 'q');
+	}
+
+	return 1;
+}
+
 /*
  * SetWindowManagerHints - функция, которая передает информацию о
  * свойствах программы менеджеру окон.
  *
  * XLib
+ *
+ * display - указатель на структуру Display
+ * PClass - класс программы
+ * argc - число аргументов
+ * window - идентификатор окна
+ * x - координата x левого верхнего угла окна
+ * y - координата y левого верхнего угла окна
+ * win_wdt - ширина  окна
+ * win_hgt - высота окна
+ * win_wdt_min - минимальная ширина окна
+ * int win_hgt_min - Минимальная высота окна
+ * ptrTitle - заголовок окна
+ * ptrITitle - заголовок пиктограммы окна
+ * pixmap - рисунок пиктограммы
  */
-static void SetWindowManagerHints(Display *display, /*Указатель на структуру Display */
-char *PClass, /*Класс программы */
-char *argv[], /*Аргументы программы */
-int argc, /*Число аргументов */
-Window window, /*Идентификатор окна */
-int x, /*Координаты левого верхнего */
-int y, /*угла окна */
-int win_wdt, /*Ширина  окна */
-int win_hgt, /*Высота окна */
-int win_wdt_min, /*Минимальная ширина окна */
-int win_hgt_min, /*Минимальная высота окна */
-char *ptrTitle, /*Заголовок окна */
-char *ptrITitle, /*Заголовок пиктограммы окна */
-Pixmap pixmap /*Рисунок пиктограммы */
-) {
+static void SetWindowManagerHints(Display *display, char *PClass, char *argv[], int argc, Window window, int x, int y, int win_wdt, int win_hgt, int win_wdt_min, int win_hgt_min, char *ptrTitle, char *ptrITitle, Pixmap pixmap) {
 	XSizeHints size_hints; /*Рекомендации о размерах окна*/
 
 	XWMHints wm_hints;
@@ -2641,23 +2746,14 @@ int main(int argc, char *argv[]) {
 				//printf("Client\n");
 				// запущен как клиент
 				pacmanClient(param1, param2);
-
-				if (appType == CLIENT_APPLICATION) {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
-				} else {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
-				}
 			} else if (strlen(param1) > 0) {
 				// запущен как сервер
 				pacmanServer(param1);
-				if (appType == SERVER_APPLICATION) {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
-				} else {
-					XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
-				}
+
+				// ждем подключения 2-го игрока и пока он отрисует у себя карту
+				waitPlayer2();
 			} else {
 				appType = SINGLE_APPLICATION;
-				XDrawString(display, window, gc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
 			}
 
 			XFreeGC(display, gc);
@@ -2671,6 +2767,11 @@ int main(int argc, char *argv[]) {
 
 			// игра
 			if (appType == CLIENT_APPLICATION) {
+				// сообщаем серверу что можно начинать игру передав ' '
+				// сервер ждет сообщения от клиента чтоб начать игру когда 2 игрок готов
+				// нужно для медленных компов долго грузящих карту
+				writeInSocket();
+
 				// 2 игрок за PAC-GIRL
 				result = gameClientMode();
 			} else {

@@ -1,16 +1,22 @@
 # Для сборки из под Windows 10 версии игры для DOS, Winfows 98, Windows XP, Windows 10 
 # с помащью Open Watcom 1.9  http://www.openwatcom.org/
 # а так же понадобиться mTCP http://brutmanlabs.org/mTCP/
-# исходник надо положить в проект MTCP по пути  C:/MTCP/APPS/PACMAN
+# исходник надо положить в проект MTCP по пути  C:/MTCP/APPS/PACMAN чтоб собрать DOS версию
 #
 # чтоб собрать все надо запустить: 
 # > cd C:/MTCP/APPS/PACMAN
 # > wmake
 #
-# чтоб версию под DOS:
+# чтоб версию под DOS собрать:
 # > wmake pacman.exe
 #
-# чтоб версию под Windows
+# для запуска из под Windows версии для DOS можно использовать DOSBox-X
+# ниже пример запуска для случая есть файл конфига лежит тут: C:\ne2000.conf 
+# а PACMAN.EXE по пути  C:/MTCP/APPS/PACMAN
+# C:\>DOSBox-X -conf ne2000.conf 
+#
+#
+# чтоб версию под Windows собрать
 #> wmake wpacman.exe 
 #
 # Possible optimizations for 8088 class processors

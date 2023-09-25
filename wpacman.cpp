@@ -1,5 +1,5 @@
 /**
- Super Turbo NET Pac-Man v1.6
+ Super Turbo NET Pac-Man v1.7
  реализация Pac-Man для Windows 98, Windows XP, Windows 10
  на основе Win32 API
 
@@ -117,7 +117,7 @@ const int NEED_INIT_NEW_GAME = 3;
 unsigned char buffer[RECV_BUFFER_SIZE];
 
 // кнопка нажатая 2 игроком на клиенте 2-го игрока
-char player2PressKey;
+char player2PressKey = EMPTY;
 
 // тип приложения
 // SINGLE_APPLICATION - не сетевая игра
@@ -349,7 +349,7 @@ char wkeys[WALL_SIZE];
 #define HEIGHT 255
 
 // Заголовок окна Win32
-#define TITLE "Super Turbo NET Pac-Man v1.6 for Windows"
+#define TITLE "Super Turbo NET Pac-Man v1.7 for Windows"
 
 // Класс программы Win32
 #define PRG_CLASS "wpacman"
@@ -401,6 +401,13 @@ int needStopGame = 0;
 
 // нужно ли при WM_PAINT перерисовать все окно (в том числе карту)
 int refreshWindow = 1;
+
+// получили ли уже что то от 2-го игрока по сети
+// 0 - нет данные по сети сервер не получал
+// 1 - сервер получил данные по сети от клиента
+// нужно чтоб игра на сервере начиналась после того как клиент отрисовал карту
+// тем самым сообщает что 2ой игрок готов к игре (нужно для слабых компов)
+int readFromClientSocket = 0;
 
 /**
  * чтение из текстового файла массива
@@ -891,6 +898,7 @@ void readFromSocketWindows() {
 			connectionLost = 1;
 		} else if (n > 0 && buffer[0] != 0) {
 			parseBuffer();
+			readFromClientSocket = 1;
 		}
 	}
 }
@@ -975,8 +983,8 @@ void drawSprite(int n, int m, char *buff, HDC pixmap) {
  * fileName - файл с данными картинки в текстовом виде
  * n - размер массива по y (количество строк в файле)
  * m - размер массива по x (количество столбцов в файле)
+ * pixmap - то где рисуем картинку
  *
- * return - pixmap с картинкой
  */
 void getImage(const char *fileName, int n, int m, HDC pixmap) {
 	int k = m + 1;
@@ -993,6 +1001,7 @@ void getImage(const char *fileName, int n, int m, HDC pixmap) {
  * Нарисовать только 1 объект с карты
  * i - строка в массиве карты
  * j - столбец в массиве карты
+ * hdc - то где рисуем картинку
  */
 void draw(int i, int j, HDC hdc) {
 	char val = map[i][j];
@@ -1214,6 +1223,7 @@ void initPixelmap() {
  * Win32 API
  *
  * Перерисовать Карту полностью (map[][]), PACMAN, Призраков
+ * hdc - то где рисуем карту
  */
 void showMap(HDC hdc) {
 	char v;
@@ -1258,7 +1268,7 @@ void showMap(HDC hdc) {
  * y - y координата левого верхнего угла
  * w - x координата правого нижнего угла
  * h - y координата правого нижнего угла
- * COLORREF color - цвет
+ * color - цвет
  */
 void drawBox(HDC hdc, int x, int y, int w, int h, COLORREF color) {
 	// Создаем кисть для заливки изображения
@@ -1278,7 +1288,7 @@ void drawBox(HDC hdc, int x, int y, int w, int h, COLORREF color) {
  * Win32 API
  *
  * Перерисовать только нужные объекты
- * 
+ * hdc - то где рисуем объекты
  */
 void refreshMap(HDC hdc) {
 	if (refreshDoor) {
@@ -1386,6 +1396,18 @@ void refreshMap(HDC hdc) {
 	strcat(txt, result);
 
 	TextOut(hdc, 300, 150, txt, strlen(txt));
+
+	SetBkColor(hdc, colorWhite);
+	SetTextColor(hdc, colorBlack);
+
+	if (appType == CLIENT_APPLICATION) {
+		TextOut(hdc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
+	} else if (appType == SERVER_APPLICATION) {
+		TextOut(hdc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
+	} else {
+		TextOut(hdc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
+	}
+
 }
 
 /**
@@ -1499,6 +1521,7 @@ int pacmanLooser() {
  * Отоброзить результат игры
  *
  *  Win32 API
+ *  hdc - то где рисуем результат
  */
 void showGameResult(HDC hdc) {
 	drawBox(hdc, 300, HEIGHT - 60, WIDTH, HEIGHT, colorWhite);
@@ -1780,6 +1803,7 @@ void readFromSocket() {
 void closeSockets() {
 	// Освобождение ресурсов Winsock
 	WSACleanup();
+	readFromClientSocket = 0;
 }
 
 /**
@@ -1976,6 +2000,8 @@ void player2() {
  * 		s - вниз
  * 		d - вправо
  * 		w - вверх
+ *
+ *  ch - код нажатой кнопки
  */
 void player1(int ch) {
 	switch (ch) {
@@ -2035,6 +2061,8 @@ void player1(int ch) {
  *
  * Обновить карту / персонажей, двери, черешню
  * для Серверной, Одиночной, Кооперативной игры
+ *
+ * hdc - то где рисуем обнавленную карту
  */
 void refreshSingleGame(HDC hdc) {
 	if (!cherryFlag && redFlag && !cherryBonus
@@ -2076,6 +2104,8 @@ void refreshSingleGame(HDC hdc) {
  *
  * Обновить карту / персонажей, двери, черешню
  * для игры 2 игроком на клиенте с другого компьютера
+ *
+ * hdc - то где рисуем обнавленную карту
  */
 void refreshClientGame(HDC hdc) {
 	map[oldY][oldX] = EMPTY;
@@ -2120,6 +2150,7 @@ void refreshClientGame(HDC hdc) {
  *  для игры 2 игроком на клиенте с другого компьютера
  *  в сетевом режиме
  *   	appType == CLIENT_APPLICATION
+ *  hdc - то где рисуем
  */
 int gameClientMode(HDC hdc) {
 	MSG msg;
@@ -2167,6 +2198,8 @@ int gameClientMode(HDC hdc) {
  *      appType == SINGLE_APPLICATION
  *  или 1 игроком на сервере в сетевом режиме
  *   	appType == SERVER_APPLICATION
+ *
+ *  hdc - то где рисуем
  */
 int game(HDC hdc) {
 	MSG msg;
@@ -2216,6 +2249,55 @@ int game(HDC hdc) {
 }
 
 /**
+ * Ждем подключения 2 го игрока к серверу
+ * он должен прислать чтонибуть
+ * после создания соединения и отресовки карты
+ * нужно для медленных компов
+ *
+ * hdc - то где рисуем
+ */
+int waitPlayer2(HDC hdc) {
+
+	MSG msg;
+
+	SetBkColor(hdc, colorWhite);
+	SetTextColor(hdc, colorBlack);
+	TextOut(hdc, 300, INPUT_TEXT_Y, "Wait P2 action", strlen("Wait P2 action"));
+
+	if (appType == SERVER_APPLICATION) {
+		do {
+			// обработка сообщений
+			if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+				if (msg.message == WM_QUIT)
+					break;
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+
+			// Нажата кнопка "ESC"
+			if (needExitFromGame) {
+				return -1;
+			}
+
+			if (readFromClientSocket) {
+				break;
+			}
+
+
+			if (connectionLost) {
+				return 0;
+			}
+
+			readFromSocket();
+
+			// Выход из игры 'q'
+		} while (!needStopGame);
+	}
+	return 1;
+}
+
+
+/**
  * Win32 API
  *
  * Ввод и редактирование хоста и порта для соединения с игровмм сервером
@@ -2226,6 +2308,8 @@ int game(HDC hdc) {
  *
  *  return - 0 пользователь хочет выйти из программы
  *  return - 1 нужно запустить игру
+ *
+ *  hdc - то где рисуем
  */
 int inputHostPort(HDC hdc) {
 	MSG msg;
@@ -2422,24 +2506,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		if (strlen(param1) > 0 && strlen(param2) > 0) {
 			// запущен как клиент
 			pacmanClient(param1, param2);
-			if (appType == CLIENT_APPLICATION) {
-				TextOut(hdc, 300, INPUT_TEXT_Y, "Client PAC-GIRL", strlen("Client PAC-GIRL"));
-			} else {
-				TextOut(hdc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
+			if (appType != CLIENT_APPLICATION) {
 				appType = SINGLE_APPLICATION;
 			}
 		} else if (strlen(param1) > 0) {
 			// запущен как сервер
 			pacmanServer(param1);
-			if (appType == SERVER_APPLICATION) {
-				TextOut(hdc, 300, INPUT_TEXT_Y, "Server PAC-MAN", strlen("Server PAC-MAN"));
-			} else {
-				TextOut(hdc, 300, INPUT_TEXT_Y, "NO connection!", strlen("NO connection!"));
+
+			// ждем подключения 2-го игрока и пока он отрисует у себя карту
+			result = waitPlayer2(hdc);
+
+			if (result == -1) {
+				break;
+			}
+
+			if (appType != SERVER_APPLICATION) {
 				appType = SINGLE_APPLICATION;
 			}
 		} else {
 			appType = SINGLE_APPLICATION;
-			TextOut(hdc, 300, INPUT_TEXT_Y, "Press 'q' or ESC", strlen("Press 'q' or ESC"));
 		}
 
 		// Начальные настройки по карте
@@ -2450,6 +2535,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 		// игра
 		if (appType == CLIENT_APPLICATION) {
+			// сообщаем серверу что можно начинать игру передав ' '
+			// сервер ждет сообщения от клиента чтоб начать игру когда 2 игрок готов
+			// нужно для медленных компов долго грузящих карту на клиенте
+			writeInSocket();
+
 			// 2 игрок за PAC-GIRL
 			result = gameClientMode(hdc);
 		} else {
