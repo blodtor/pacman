@@ -1352,117 +1352,117 @@ char * getImage(int sx, int sy, const char *fileName, int n, int m) {
  */
 void draw(int i, int j) {
     char val = map[i][j] ;
-    int y=i*8;
-    int x=j*8;
+    int y=i*8-2;
+    int x=j*8-2;
 
     if (val == PACMAN) {
         if (pacmanSprite == 1) {
             pacmanSprite = 2;
             if (dx < 0) {
-                _putimage(x-2, y-2, images[5], _GPSET);
+                _putimage(x, y, images[5], _GPSET);
             } else if (dx > 0) {
-                _putimage(x-2, y-2, images[7], _GPSET);
+                _putimage(x, y, images[7], _GPSET);
             } else if (dy < 0) {
-                _putimage(x-2, y-2, images[9], _GPSET);
+                _putimage(x, y, images[9], _GPSET);
             } else if (dy > 0) {
-                _putimage(x-2, y-2, images[11], _GPSET);
+                _putimage(x, y, images[11], _GPSET);
             } else {
-                _putimage(x-2, y-2, images[4], _GPSET);
+                _putimage(x, y, images[4], _GPSET);
             }
         } else if (pacmanSprite == 2) {
             pacmanSprite = 3;
             if (dx < 0) {
-                _putimage(x-2, y-2, images[6], _GPSET);
+                _putimage(x, y, images[6], _GPSET);
             } else if (dx > 0) {
-                _putimage(x-2, y-2, images[8], _GPSET);
+                _putimage(x, y, images[8], _GPSET);
             } else if (dy < 0) {
-                _putimage(x-2, y-2, images[10], _GPSET);
+                _putimage(x, y, images[10], _GPSET);
             } else if (dy > 0) {
-                _putimage(x-2, y-2, images[12], _GPSET);
+                _putimage(x, y, images[12], _GPSET);
             } else {
-                _putimage(x-2, y-2, images[4], _GPSET);
+                _putimage(x, y, images[4], _GPSET);
             }
         } else if (pacmanSprite == 3) {
             pacmanSprite = 1;
-            _putimage(x-2, y-2,  images[4], _GPSET);
+            _putimage(x, y,  images[4], _GPSET);
         }
     } else if (val == RED) {
         if (redSprite == 1) {
             redSprite = 2;
             if (dxRed < 0) {
-            	_putimage(x-2, y-2,images[13], _GPSET);
+            	_putimage(x, y,images[13], _GPSET);
             } else if (dxRed > 0) {
-            	_putimage(x-2, y-2,images[15], _GPSET);
+            	_putimage(x, y,images[15], _GPSET);
             } else if (dyRed > 0) {
-            	_putimage(x-2, y-2,images[17], _GPSET);
+            	_putimage(x, y,images[17], _GPSET);
             } else {
-            	_putimage(x-2, y-2,images[19], _GPSET);
+            	_putimage(x, y,images[19], _GPSET);
             }
         } else {
             redSprite = 1;
             if (dxRed < 0) {
-            	_putimage(x-2, y-2,images[14], _GPSET);
+            	_putimage(x, y,images[14], _GPSET);
             } else if (dxRed > 0) {
-            	_putimage(x-2, y-2,images[16], _GPSET);
+            	_putimage(x, y,images[16], _GPSET);
             } else if (dyRed > 0) {
-            	_putimage(x-2, y-2,images[18], _GPSET);
+            	_putimage(x, y,images[18], _GPSET);
             } else {
-            	_putimage(x-2, y-2,images[20], _GPSET);
+            	_putimage(x, y,images[20], _GPSET);
             }
         }
     } else if (val == PACGIRL) {
         if (pacGirlSprite == 1) {
         	pacGirlSprite = 2;
             if (dxPacGirl < 0) {
-            	_putimage(x-2, y-2, images[25], _GPSET);
+            	_putimage(x, y, images[25], _GPSET);
             } else if (dxPacGirl > 0) {
-            	_putimage(x-2, y-2, images[27], _GPSET);
+            	_putimage(x, y, images[27], _GPSET);
             } else if (dyPacGirl < 0) {
-            	_putimage(x-2, y-2, images[29], _GPSET);
+            	_putimage(x, y, images[29], _GPSET);
             } else if (dyPacGirl > 0) {
-            	_putimage(x-2, y-2, images[31], _GPSET);
+            	_putimage(x, y, images[31], _GPSET);
             } else {
-            	_putimage(x-2, y-2, images[24], _GPSET);
+            	_putimage(x, y, images[24], _GPSET);
             }
         } else if (pacGirlSprite == 2) {
         	pacGirlSprite = 3;
             if (dxPacGirl < 0) {
-            	_putimage(x-2, y-2, images[26], _GPSET);
+            	_putimage(x, y, images[26], _GPSET);
             } else if (dxPacGirl > 0) {
-            	_putimage(x-2, y-2, images[28], _GPSET);
+            	_putimage(x, y, images[28], _GPSET);
             } else if (dyPacGirl < 0) {
-            	_putimage(x-2, y-2, images[30], _GPSET);
+            	_putimage(x, y, images[30], _GPSET);
             } else if (dyPacGirl > 0) {
-            	_putimage(x-2, y-2, images[32], _GPSET);
+            	_putimage(x, y, images[32], _GPSET);
             } else {
-            	_putimage(x-2, y-2, images[24], _GPSET);
+            	_putimage(x, y, images[24], _GPSET);
             }
         } else if (pacGirlSprite == 3) {
         	pacGirlSprite = 1;
 			if (dxPacGirl != 0) {
-				_putimage(x-2, y-2,  images[24], _GPSET);
+				_putimage(x, y,  images[24], _GPSET);
 			} else {
-				_putimage(x-2, y-2,  images[33], _GPSET);
+				_putimage(x, y,  images[33], _GPSET);
 			}
         }
     } else if (val == SHADOW) {
         if (redSprite == 1) {
             redSprite = 2;
-            _putimage(x-2, y-2, images[21], _GPSET);
+            _putimage(x, y, images[21], _GPSET);
         } else {
             redSprite = 1;
-            _putimage(x-2, y-2, images[22], _GPSET);
+            _putimage(x, y, images[22], _GPSET);
         }
     } else if (val == FOOD) {
-    	_putimage(x-2, y-2, images[1], _GPSET);
+    	_putimage(x, y, images[1], _GPSET);
     } else if (val == EMPTY) {
-    	_putimage(x-2, y-2, images[2], _GPSET);
+    	_putimage(x, y, images[2], _GPSET);
     } else if (val == POWER_FOOD) {
-    	_putimage(x-2, y-2, images[3], _GPSET);
+    	_putimage(x, y, images[3], _GPSET);
     } else if (val == CHERRY) {
-    	_putimage(x-2, y-2, images[0], _GPSET);
+    	_putimage(x, y, images[0], _GPSET);
     } else if (val == DOOR) {
-    	_putimage(x-2, y-2, images[23], _GPSET);
+    	_putimage(x, y, images[23], _GPSET);
     }
 }
 

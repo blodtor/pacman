@@ -1,10 +1,9 @@
 # Для сборки из под Windows 10 версии игры для DOS, Winfows 98, Windows XP, Windows 10 
 # с помащью Open Watcom 1.9  http://www.openwatcom.org/
-# а так же понадобиться mTCP http://brutmanlabs.org/mTCP/
-# исходник надо положить в проект MTCP по пути  C:/MTCP/APPS/PACMAN чтоб собрать DOS версию
+# чтоб собрать под DOS вам нужен mTCP http://brutmanlabs.org/mTCP/ 
+# (но нужные исходники я уже положил в проект в папки TCPINC и TCPLIB)
 #
 # чтоб собрать все надо запустить: 
-# > cd C:/MTCP/APPS/PACMAN
 # > wmake
 #
 # чтоб версию под DOS собрать:
@@ -12,54 +11,49 @@
 #
 # для запуска из под Windows версии для DOS можно использовать DOSBox-X
 # ниже пример запуска для случая есть файл конфига лежит тут: C:\ne2000.conf 
-# а PACMAN.EXE по пути  C:/MTCP/APPS/PACMAN
+# а PACMAN.EXE по пути  C:\PACMAN
 # C:\>DOSBox-X -conf ne2000.conf 
 #
 #
 # чтоб версию под Windows собрать
 #> wmake wpacman.exe 
 #
-# Possible optimizations for 8088 class processors
-#
-# -oa   Relax alias checking
-# -ob   Try to generate straight line code
-# -oe - expand user functions inline (-oe=20 is default, adds lots of code)
-# -oh   Enable repeated optimizations
-# -oi   generate certain lib funcs inline
-# -oi+  Set max inline depth (C++ only, use -oi for C)
-# -ok   Flowing of register save into function flow graph
-# -ol   loop optimizations
-# -ol+  loop optimizations plus unrolling
-# -or   Reorder for pipelined (486+ procs); not sure if good to use
-# -os   Favor space over time
-# -ot   Favor time over space
-# -ei   Allocate an "int" for all enum types
-# -zp2  Allow compiler to add padding to structs
-# -zpw  Use with above; make sure you are warning free!
-# -0    8088/8086 class code generation
-# -s    disable stack overflow checking
-# -zmf  put each function in a new code segment; helps with linking
-# Make it fast.  But don't use -oe otherwise you'll need large model.
 
-tcp_h_dir = ..\..\TCPINC\
-tcp_c_dir = ..\..\TCPLIB\
-common_h_dir = ..\..\INCLUDE
+# заголовочные файлы библиотек из проекта mTCP необходимые для сборки под DOS
+tcp_h_dir = TCPINC\
 
+# исходники библиотек из проекта mTCP необходимые для сборки под DOS
+tcp_c_dir = TCPLIB\
+
+# заголовочные файлы библиотек из проекта mTCP необходимые для сборки под DOS
+common_h_dir = INCLUDE\
+
+# модель памяти при сборке под DOS
 memory_model = -mc
+
+# опции компиляции под DOS
 compile_options = -0 $(memory_model) -DCFG_H="pacman.cfg" -oh -os -s -zp2 -zpw -we
+
+# опции компиляции под DOS - пути к исходникам и заголовочным файлам
 compile_options += -i=$(tcp_h_dir) -i=$(common_h_dir)
 
-
+# имена объектных файлов которые нужно получить в процессе сборки под DOS
 tcpobjs = packet.obj arp.obj eth.obj ip.obj tcp.obj tcpsockm.obj udp.obj utils.obj dns.obj timer.obj ipasm.obj trace.obj
+
+# имя объектного файла игры pacman для DOS
 objs = pacman.obj
 
+# собираем из под Windows исполняемые файлы для DOS, Windows, Linux с удалением файлов прошлой сборки
 all : clean pacman.exe wpacman.exe
 
+# удалить все фалы сборки
 clean : .symbolic
+  @del pacman
   @del pacman.exe
   @del wpacman.exe
   @del *.obj
   @del *.map
+  @del *.o
 
 patch : .symbolic
   ..\..\utils\ptach pacman.exe pacman.map $(memory_model)
@@ -74,9 +68,14 @@ patch : .symbolic
 .cpp.obj :
   wpp $[* $(compile_options)
 
-
+# сборка для DOS
+# Нужен openwatcom 1.9
+# запустить после сборки можно так: dosbox-x -conf ne2000.conf
 pacman.exe: $(tcpobjs) $(objs)
   wlink system dos option map option eliminate option stack=4096 name $@ file *.obj
 
+# сборка для Windows 98, Windows XP, Windows 10
+# Нужен openwatcom 1.9
+# запустить после сборки можно так: wpacman.exe
 wpacman.exe:
   wcl386 -l=nt_win ws2_32.lib -bt=nt wpacman.cpp

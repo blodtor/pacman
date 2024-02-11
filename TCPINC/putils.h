@@ -1,0 +1,1 @@
+extern void readMapFromFile(const char *fileName, char *buff, int n, int m);
