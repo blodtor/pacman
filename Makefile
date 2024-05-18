@@ -30,6 +30,10 @@
 # или так: 
 # > g++ -o xpacman xpacman.cpp -lX11
 #
+# для macOS можно так:
+# > brew install --cask xquartz
+# > g++ -o xpacman xpacman.cpp -L/opt/X11/lib -I/opt/X11/include -lX11
+#
 # сборка под Windows:
 # > make wpacman
 #
@@ -100,6 +104,14 @@ pacman-linux.o: pacman.cpp
 
 xpacman.o: xpacman.cpp
 	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< 
+
+# сборка для macOS под Xы (графическая версия)
+# перед сборкой нужно установить X11 сервер например XQuartz 
+# > brew install --cask xquartz
+# перед запуском игры, нужно запустить X11 сервер тот же XQuartz
+# запустить после сборки можно так: ./xpacman
+xpacman-macos: xpacman.cpp
+	g++ -o xpacman xpacman.cpp -L/opt/X11/lib -I/opt/X11/include -lX11
 
 # сборка для Windows 98, Windows XP, Windows 10
 # Нужен openwatcom 1.9
