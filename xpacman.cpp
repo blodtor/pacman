@@ -1,12 +1,14 @@
 /**
- Super Turbo NET Pac-Man v1.7
- реализация Pac-Man для GNU/Linux под X11 (это НЕ консольная версия, без Xов не будет работать!)
+ Super Turbo NET Pac-Man v1.8
+ реализация Pac-Man для GNU/Linux и macOS под X11 (это НЕ консольная версия, без Xов не будет работать!)
  на основе библиотеки XLib
 
  Из Linux собирается так:
  > make xpacman
  или
  > g++ -o xpacman xpacman.cpp -lX11
+ или
+ > g++ -o xpacman xpacman.cpp -L/opt/X11/lib -I/opt/X11/include -lX11
 
  может соеденятся по сети с версией v1.3 (DOS версия и консольная для GNU/Linux)
 
@@ -343,7 +345,7 @@ char serverHostPort[INPUT_TEXT_LENGHT];
 #define BORDER_WIDTH 5
 
 // Заголовок окна X11
-#define TITLE "Super Turbo NET Pac-Man v1.7 for X11"
+#define TITLE "Super Turbo NET Pac-Man v1.8 for X11"
 
 // Заголовок пиктограммы окна X11
 #define ICON_TITLE "xpacman"
@@ -2143,9 +2145,6 @@ int gameClientMode() {
 	// a dealie-bob to handle KeyPress Events
 	KeySym key;
 
-	// буфер символов для KeyPress Events
-	char text[255];
-
 	// нажатая клавиша на клавиатуре
 	int ch;
 
@@ -2176,38 +2175,36 @@ int gameClientMode() {
 				break;
 
 			case KeyPress:
-				/* Выход нажатием клавиши клавиатуры */
-				if (xEvent.xkey.keycode == 9) {
-					// нажат ESC
-					return -1;
-				}
+				key = XLookupKeysym((XKeyEvent*)&xEvent, 0);
 
-				if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
-					//gc = XCreateGC(display, window, 0, NULL);
-					ch = text[0];
-				}
 				// Обработка нажатых кнопок
 				// в оденочной игре или в кооперативной с одного компьютера
 				// и на Сервере 1 игроком при сетевой игре
 				// в этом режиме можно управлять обоими персонажами
 				// нужно перекодировать нажатые клавиши для совместимости с версией 1.3
-				switch (xEvent.xkey.keycode) {
-				// key UP
-				case 111:
+				switch (key) {
+				case XK_Escape:
+					// нажат ESC
+					// Выход нажатием клавиши клавиатуры
+					return -1;
+				    // key UP
+				case XK_Up:
 					ch = 65;
 					break;
 					// key DOWN
-				case 116:
+				case XK_Down:
 					ch = 66;
 					break;
 					// key LEFT
-				case 113:
+				case XK_Left:
 					ch = 68;
 					break;
 					// key RIGHT
-				case 114:
+				case XK_Right:
 					ch = 67;
 					break;
+				default:
+					ch = 0;
 				}
 
 				player2PressKey = ch;
@@ -2230,7 +2227,7 @@ int gameClientMode() {
 			}
 		}
 
-	} while (ch != 'q');
+	} while (key != XK_q);
 	return 1;
 }
 
@@ -2249,9 +2246,6 @@ int game() {
 
 	// a dealie-bob to handle KeyPress Events
 	KeySym key;
-
-	// буфер символов для KeyPress Events
-	char text[255];
 
 	// нажатая клавиша на клавиатуре
 	int ch;
@@ -2274,20 +2268,46 @@ int game() {
 				break;
 
 			case KeyPress:
-				/* Выход нажатием клавиши клавиатуры */
-				if (xEvent.xkey.keycode == 9) {
-					// нажат ESC
-					return -1;
+				key = XLookupKeysym((XKeyEvent*)&xEvent, 0);
+
+				switch (key) {
+					case XK_Escape:
+						// нажат ESC
+						// Выход нажатием клавиши клавиатуры
+						return -1;
+					case XK_Up:
+						ch = 111;
+						break;
+					case XK_Down:
+						ch = 116;
+						break;
+					case XK_Left:
+						ch = 113;
+						break;
+					case XK_Right:
+						ch = 114;
+						break;
+					case XK_w:
+						ch = 25;
+						break;
+					case XK_a:
+						ch = 38;
+						break;
+					case XK_d:
+						ch = 40;
+						break;
+					case XK_s:
+						ch = 39;
+						break;
+					default:
+						ch = 0;
 				}
-				if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
-					//gc = XCreateGC(display, window, 0, NULL);
-					ch = text[0];
-				}
+
 				// Обработка нажатых кнопок
 				// в оденочной игре или в кооперативной с одного компьютера
 				// и на Сервере 1 игроком при сетевой игре
 				// в этом режиме можно управлять обоими персонажами
-				player1(xEvent.xkey.keycode);
+				player1(ch);
 				break;
 
 			case ClientMessage:
@@ -2322,7 +2342,7 @@ int game() {
 		}
 
 		// Выход из игры 'q'
-	} while (ch != 'q');
+	} while (key != XK_q);
 
 	return 1;
 }
@@ -2600,15 +2620,17 @@ int inputHostPort() {
 			break;
 
 		case KeyPress:
+
 			/* Выход нажатием клавиши клавиатуры */
 			if (XLookupString(&xEvent.xkey, text, 255, &key, 0) == 1) {
 				gc = XCreateGC(display, window, 0, NULL);
-				if (xEvent.xkey.keycode == 9) {
+
+				if (key == XK_Escape) {
 					// нажат ESC
 					XFreeGC(display, gc);
 
 					return 0;
-				} else if (xEvent.xkey.keycode == 36) {
+				} else if (key == XK_Return) {
 					// нажат ENTER
 
 					// устанавливаем белый цвет - которым будем рисовать
@@ -2656,7 +2678,7 @@ int inputHostPort() {
 					XFreeGC(display, gc);
 					XFlush(display);
 					return 1;
-				} else if (xEvent.xkey.keycode == 22) {
+				} else if (key == XK_BackSpace) {
 					// Нажат BACKSPACE
 					if (word > 0) {
 						// уменьшаем количество введенных символо
